@@ -272,7 +272,15 @@ def construct_motif_concept_dataloader_from_control(
 
 
 def construct_concept(
-    cn, c_seq, chrom_bed, idx, genome_fasta, signal_bws, transforms=None, batch_size=8
+    cn,
+    c_seq,
+    chrom_bed,
+    idx,
+    genome_fasta,
+    signal_bws,
+    transforms=None,
+    window_len=1024,
+    batch_size=8,
 ):
     if c_seq.endswith(".fa"):
         seq_fa = c_seq
@@ -282,6 +290,7 @@ def construct_concept(
             chrom_bed=chrom_bed,
             genome_fasta=genome_fasta,
             bws=signal_bws,
+            window_len=window_len,
             transforms=transforms,
             batch_size=batch_size,
         )
@@ -293,6 +302,7 @@ def construct_concept(
             chrom_bed=chrom_bed,
             genome_fasta=genome_fasta,
             bws=signal_bws,
+            window_len=window_len,
             transforms=transforms,
             batch_size=batch_size,
         )
@@ -391,6 +401,7 @@ def main():
         seq_bed=random_regions_fn,
         seq_fa=None,
         chrom_bed=random_regions_fn,
+        window_len=args.input_window_length,
         genome_fasta=args.genome_fasta_file,
         bws=None,
         batch_size=BATCH_SIZE,
