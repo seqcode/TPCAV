@@ -138,7 +138,9 @@ def main():
             regions.append(re.split(r"[:-]", r))
 
         # project input
-        avs = tpcav_model.forward_until_select_layer(seq.to(device))
+        avs = tpcav_model.forward_until_select_layer(
+            utils.seq_transform_fn(seq.to(device))
+        )
         avs_residual, avs_projected = tpcav_model.project_avs_to_pca(
             avs.flatten(start_dim=1).to(device)
         )
@@ -160,7 +162,9 @@ def main():
         bseq = bseq[: (avs.shape[0] * args.num_baselines_per_sample)]
 
         # do normal model forward on baselines to get activations
-        bavs = tpcav_model.forward_until_select_layer(bseq.to(device))
+        bavs = tpcav_model.forward_until_select_layer(
+            utils.seq_transform_fn(bseq.to(device))
+        )
         bavs_residual, bavs_projected = tpcav_model.project_avs_to_pca(
             bavs.flatten(start_dim=1).to(device)
         )

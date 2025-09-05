@@ -55,7 +55,6 @@ def iterate_seq_df_chunk(
     motif=None,
     motif_mode="pwm",
     num_motifs=128,
-    seq_transform_fn=seq_transform_fn,
     start_buffer=0,
     end_buffer=0,
     return_region=False,
@@ -103,8 +102,6 @@ def iterate_seq_df_chunk(
 
         if batch_size is None:
             seq_one_hot = dna2OneHot(seq)
-            if seq_transform_fn is not None:
-                seq_one_hot = seq_transform_fn(seq_one_hot)
             if return_region:
                 yield f"{item.chrom}:{item.start}-{item.end}", seq_one_hot
             else:
@@ -114,8 +111,6 @@ def iterate_seq_df_chunk(
             regions.append(f"{item.chrom}:{item.start}-{item.end}")
             if len(seq_one_hots) >= batch_size:
                 seq_one_hots = torch.stack(seq_one_hots)
-                if seq_transform_fn is not None:
-                    seq_one_hots = seq_transform_fn(seq_one_hots)
                 if return_region:
                     yield regions, seq_one_hots
                 else:
@@ -125,9 +120,9 @@ def iterate_seq_df_chunk(
     if (len(seq_one_hots) > 0) and batch_size is not None:
         seq_one_hots = torch.stack(seq_one_hots)
         if return_region:
-            yield regions, seq_transform_fn(seq_one_hots)
+            yield regions, seq_one_hots
         else:
-            yield seq_transform_fn(seq_one_hots)
+            yield seq_one_hots
 
 
 def iterate_seq_df(

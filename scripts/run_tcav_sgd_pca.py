@@ -447,7 +447,9 @@ def main():
         for seq in concept.data_iter:
             # print(seq)
             # print(concept)
-            av = model.forward_until_select_layer(seq.to(device))
+            av = model.forward_until_select_layer(
+                utils.seq_transform_fn(seq.to(device))
+            )
             avs.append(av.detach().cpu())
             num += av.shape[0]
             if num >= num_samples:
@@ -512,9 +514,13 @@ def main():
                     seq_shuffled.append(s)
                 seq_shuffled = torch.stack(seq_shuffled)
                 assert seq_shuffled.shape[1] == 4
-                av = model.forward_until_select_layer(seq_shuffled.to(device))
+                av = model.forward_until_select_layer(
+                    utils.seq_transform_fn(seq_shuffled.to(device))
+                )
             else:
-                av = model.forward_until_select_layer(seq.to(device))
+                av = model.forward_until_select_layer(
+                    utils.seq_transform_fn(seq.to(device))
+                )
             av_residual, av_projected = model.project_avs_to_pca(
                 av.flatten(start_dim=1)
             )
