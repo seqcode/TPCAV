@@ -39,3 +39,7 @@ srun -n1 -c8 --gres=gpu:1 --mem=128G \
 
 -  run the jupyer notebook to generate summary of your results
 
+```bash
+papermill -f scripts/compute_tcav_v2_pwm.example.yaml scripts/compute_tcav_v2_pwm.py.ipynb cavs_test/tcav_report.py.ipynb
+```
+
