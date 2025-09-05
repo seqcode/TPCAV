@@ -1,6 +1,0 @@
-,fscore,support,tcav_score_median_test,tcav_pos_ratio_test,tcav_pos_ratio_control,concept,rep
-0,0.4920492721164613,[461 484],6.441417,1.0,0.0,AC0001:GATA-PROP:GATA,random_regions
-1,0.4844630945489006,[461 441],0.40572208,1.0,0.0,AC0002:PROP-ALX:Homeodomain,random_regions
-2,0.5145967342899554,[461 439],1.1888907,1.0,0.0,AC0003:HNF1A-HNF1B:Homeodomain,random_regions
-3,0.5563891375485199,[461 434],0.29449302,1.0,0.0,AC0004:ZSCAN:C2H2_ZF,random_regions
-4,0.49599747474747474,[461 434],-0.06644855,0.0,1.0,"AC0005:POU3F-POU1F:Homeodomain,POU",random_regions
