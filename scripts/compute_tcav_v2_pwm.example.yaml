@@ -1,0 +1,15 @@
+# parameters
+cav_root_dir: "./cavs_test/cavs/"
+
+attrs: "./cavs_test/test.attributions.pt"
+
+activations_projected: "./cavs_test/test.activations_projected.pt"
+
+activations_residual: "./cavs_test/test.activations_residual.pt"
+
+regions: "./cavs_test/test.regions.bed"
+
+output_dir: "output/tcavs/"
+
+fscore_threshold: 0.95
+

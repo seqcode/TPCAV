@@ -1,0 +1,5 @@
+data/hg19.fa
+data/checkpoint*
+**/__pycache__/
+**/.ipynb_checkpoints/
+cavs_test/
