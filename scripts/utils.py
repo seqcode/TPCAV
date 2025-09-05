@@ -123,10 +123,11 @@ def iterate_seq_df_chunk(
                 seq_one_hots = []
                 regions = []
     if (len(seq_one_hots) > 0) and batch_size is not None:
+        seq_one_hots = torch.stack(seq_one_hots)
         if return_region:
-            yield regions, torch.stack(seq_one_hots)
+            yield regions, seq_transform_fn(seq_one_hots)
         else:
-            yield torch.stack(seq_one_hots)
+            yield seq_transform_fn(seq_one_hots)
 
 
 def iterate_seq_df(
