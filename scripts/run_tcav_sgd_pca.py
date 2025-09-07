@@ -382,6 +382,8 @@ def main():
 
     # load model, this part is model specific
     model = utils.load_model()
+    model.eval()
+    model.to(device)
     logger.info(f"Loaded model")
 
     # load PCA model
@@ -514,6 +516,8 @@ def main():
     model.register_buffer("orig_shape", torch.tensor(orig_shape).to(device))
     # save the new model
     torch.save(model, f"{args.output_dir}/tpcav_model.pt")
+    # set to eval mode for sanity
+    model.eval()
 
     def get_tpcav_activations(concept, shuffle=False):
         avs_pca = []
