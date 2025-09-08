@@ -18,7 +18,9 @@ There are 3 places you need to insert your own code.
         - `project_avs_to_pca`: this function takes care of the PCA projection
 
 2. Function `load_model` in utils.py
-    - Take care of the model initialization and load saved parameters in `load_model`, return the model
+    - Take care of the model initialization and load saved parameters in `load_model`, return the model instance.
+    > NOTE: you need to use your own model class definition in models.py, as we need the functions defined in step 1.
+
 3. Function `seq_transform_fn` in utils.py
     - By default the dataloader provides one hot coded DNA array of shape (batch_size, 4, len), coded in the order [A, C, G, T], if your model takes a different kind of input, modify `seq_transform_fn` to transform the input
 
