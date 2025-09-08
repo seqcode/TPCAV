@@ -271,6 +271,32 @@ def construct_motif_concept_dataloader_from_control(
     return dl
 
 
+def construct_bed_concept_dataloader_from_control(
+    control_seq_bed_df,
+    genome_fasta,
+    regions_df,
+    batch_size=8,
+    num_workers=0,
+    infinite=False,
+):
+    "Construct a concept from control sequence bed file and insert motif sequence"
+    # take shard of the dataframe if specified
+    dl = torch.utils.data.DataLoader(
+        utils.IterateSeqDataFrame(
+            control_seq_bed_df,
+            genome_fasta,
+            regions_insert=regions_df,
+            print_warning=False,
+            infinite=infinite,
+        ),
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=True,
+    )
+
+    return dl
+
+
 def construct_concept(
     cn,
     c_seq,
@@ -345,6 +371,12 @@ def main():
         type=str,
         default=None,
         help="Motif file in MEME minimal format",
+    )
+    parser.add_argument(
+        "--bed-concepts",
+        type=str,
+        default=None,
+        help="Bed file of regions provided as concepts, format: [chrom, start, end, strand, concept_name]",
     )
     parser.add_argument(
         "--num-motifs", type=int, default=12, help="Number of motifs to insert"
@@ -449,6 +481,24 @@ def main():
                 )
                 concepts.append(Concept(id=idx, name=cn, data_iter=seq_dl))
                 idx += 1
+    if args.bed_concepts is not None:
+        bed_df = pd.read_table(
+            args.bed_concepts,
+            header=None,
+            usecols=[0, 1, 2, 3, 4],
+            names=["chrom", "start", "end", "strand", "concept_name"],
+        )
+        for cn in bed_df.concept_name.unique():
+            cn_bed_df = bed_df.loc[bed_df.concept_name == cn]
+            seq_dl = construct_bed_concept_dataloader_from_control(
+                random_regions_df,
+                args.genome_fasta_file,
+                regions_df=cn_bed_df,
+                batch_size=BATCH_SIZE,
+                infinite=False,
+            )
+            concepts.append(Concept(id=idx, name=cn, data_iter=seq_dl))
+            idx += 1
 
     logger.info("Constructed concepts")
     logger.info(concepts)

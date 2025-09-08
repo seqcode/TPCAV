@@ -13,9 +13,9 @@ import seqchromloader as scl
 import torch
 from Bio import SeqIO
 from deeplift.dinuc_shuffle import dinuc_shuffle
-from generate_motif_concepts_v3 import insert_motif_into_seq
 from pybedtools import BedTool
 from pyfaidx import Fasta
+from seq_utils import insert_motif_into_seq, insert_region_into_seq
 from seqchromloader.utils import dna2OneHot
 from torch.utils.data import TensorDataset, default_collate, get_worker_info
 
@@ -54,14 +54,17 @@ def iterate_seq_df_chunk(
     genome,
     motif=None,
     motif_mode="pwm",
+    regions_insert=None,
     num_motifs=128,
     start_buffer=0,
     end_buffer=0,
     return_region=False,
     batch_size=None,
     print_warning=True,
+    rng=np.random.default_rng(1),
 ):
     "Core function to generate motif concepts given a motif instance and a dataframe of regions"
+
     seq_one_hots = []
     regions = []
     for item in chunk.itertuples():
@@ -98,7 +101,10 @@ def iterate_seq_df_chunk(
                 start_buffer=start_buffer,
                 end_buffer=end_buffer,
                 mode=motif_mode,
+                rng=rng,
             )
+        elif regions_insert is not None:
+            seq = insert_region_into_seq(seq, regions_insert, genome, rng=rng)
 
         if batch_size is None:
             seq_one_hot = dna2OneHot(seq)
@@ -133,9 +139,11 @@ def iterate_seq_df(
     motif_mode="pwm",
     start_buffer=0,
     end_buffer=0,
+    regions_insert=None,
     batch_size=32,
     return_region=False,
     print_warning=True,
+    rng=np.random.default_rng(1),
 ):
     genome = Fasta(genome_fasta)
     yield from iterate_seq_df_chunk(
@@ -146,9 +154,11 @@ def iterate_seq_df(
         motif_mode=motif_mode,
         start_buffer=start_buffer,
         end_buffer=end_buffer,
+        regions_insert=regions_insert,
         return_region=return_region,
         batch_size=batch_size,
         print_warning=print_warning,
+        rng=rng,
     )
 
 
@@ -160,8 +170,10 @@ def iterate_seq_bed(
     motif_mode="pwm",
     start_buffer=0,
     end_buffer=0,
+    regions_insert=None,
     batch_size=32,
     print_warning=True,
+    rng=np.random.default_rng(1),
 ):
     seq_df = pd.read_table(seq_bed, usecols=range(3), names=["chrom", "start", "end"])
     yield from iterate_seq_df(
@@ -172,8 +184,10 @@ def iterate_seq_bed(
         num_motifs=num_motifs,
         start_buffer=start_buffer,
         end_buffer=end_buffer,
+        regions_insert=regions_insert,
         batch_size=batch_size,
         print_warning=print_warning,
+        rng=rng,
     )
 
 
@@ -187,6 +201,7 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
         num_motifs=128,
         start_buffer=0,
         end_buffer=0,
+        regions_insert=None,
         return_region=False,
         print_warning=True,
         infinite=False,
@@ -198,6 +213,7 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
         self.num_motifs = num_motifs
         self.start_buffer = start_buffer
         self.end_buffer = end_buffer
+        self.regions_insert = regions_insert
         self.return_region = return_region
         self.print_warning = print_warning
         self.infinite = infinite
@@ -205,6 +221,7 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
     def __iter__(self):
         worker_info = get_worker_info()
         self.genome = pyfaidx.Fasta(self.genome_fasta)
+        rng = np.random.default_rng(worker_info.id if worker_info is not None else 1)
 
         if self.infinite:
             while True:
@@ -220,9 +237,11 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
                         num_motifs=self.num_motifs,
                         start_buffer=self.start_buffer,
                         end_buffer=self.end_buffer,
+                        regions_insert=self.regions_insert,
                         batch_size=None,
                         return_region=self.return_region,
                         print_warning=self.print_warning,
+                        rng=rng,
                     )
                 except StopIteration:
                     continue
@@ -241,9 +260,11 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
                 num_motifs=self.num_motifs,
                 start_buffer=self.start_buffer,
                 end_buffer=self.end_buffer,
+                regions_insert=self.regions_insert,
                 batch_size=None,
                 return_region=self.return_region,
                 print_warning=self.print_warning,
+                rng=rng,
             )
 
 
