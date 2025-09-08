@@ -9,9 +9,14 @@ Since not every saved pytorch model stores the computation graph, you need to ma
 There are 3 places you need to insert your own code.
 
 1. Model class definition in models.py
-    - Please first copy your class definition into the script, then add two class functions:
+    - Please first copy your class definition into `Model_Class` in the script, it already has several pre-defined class functions, you need to fill in the following two functions:
         - `forward_until_select_layer`: this is the function that takes your model input and forward until the layer you want to compute TPCAV score on
         - `resume_forward_from_select_layer`: this is the function that starts from the activations of your select layer and forward all the way until the end
+    -  There are also functions necessary for TPCAV computation, don't change them:
+        - `forward_from_start`: this function calls `forward_until_select_layer` and `resume_forward_from_select_layer` to do a full forward pass
+        - `forward_from_projected_and_residual`: this function takes the PCA projected activations and unexplained residual to do the forward pass
+        - `project_avs_to_pca`: this function takes care of the PCA projection
+
 2. Function `load_model` in utils.py
     - Take care of the model initialization and load saved parameters in `load_model`, return the model
 3. Function `seq_transform_fn` in utils.py
