@@ -17,6 +17,8 @@ There are 3 places you need to insert your own code.
         - `forward_from_projected_and_residual`: this function takes the PCA projected activations and unexplained residual to do the forward pass
         - `project_avs_to_pca`: this function takes care of the PCA projection
 
+    > NOTE: you can modify your final output tensor to specifically explain certain transformation of your output, for example, you can take weighted sum of base pair resolution signal prediction to emphasize high signal region.
+
 2. Function `load_model` in utils.py
     - Take care of the model initialization and load saved parameters in `load_model`, return the model instance.
     > NOTE: you need to use your own model class definition in models.py, as we need the functions defined in step 1.
@@ -24,8 +26,6 @@ There are 3 places you need to insert your own code.
 3. Function `seq_transform_fn` in utils.py
     - By default the dataloader provides one hot coded DNA array of shape (batch_size, 4, len), coded in the order [A, C, G, T], if your model takes a different kind of input, modify `seq_transform_fn` to transform the input
 
-
-    > NOTE: you can modify your final output tensor to specifically explain certain transformation of your output, for example, you can take weighted sum of base pair resolution signal prediction to emphasize high signal region.
 
 - Compute CAVs on your model, example command:
 
