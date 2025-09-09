@@ -15,7 +15,6 @@ from multiprocessing import Pool
 from os import makedirs, path
 
 import numpy as np
-import pandas as pd
 import seqchromloader as scl
 import torch
 import utils
@@ -89,6 +88,12 @@ def main():
         default=3,
         type=int,
         help="Number of bins to split the region for inserting motifs",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=5000,
+        help="Maximum number of samples to draw for training classifier on each concept",
     )
     parser.add_argument(
         "--classifier", default="sgd", help="choose from sgd or cuml_sgd"
