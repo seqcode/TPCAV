@@ -131,16 +131,21 @@ def main():
     target_preds = []
     baseline_preds = []
     # for inpt, binpt in zip(target_dl, baseline_dl):
-    for (region, seq, _, _, _), (bseq, _, _, _) in zip(target_dl, baseline_dl):
+    for (region, seq, chrom, _, _), (bseq, bchrom, _, _) in zip(target_dl, baseline_dl):
         assert bseq.shape[0] == 8 * args.num_baselines_per_sample
         # save regions
         for r in region:
             regions.append(re.split(r"[:-]", r))
 
         # project input
-        avs = tpcav_model.forward_until_select_layer(
-            utils.seq_transform_fn(seq.to(device))
-        )
+        seq = utils.seq_transform_fn(seq)
+        chrom = utils.chrom_transform_fn(chrom)
+        if chrom is not None:
+            avs = tpcav_model.forward_until_select_layer(
+                seq.to(device), chrom.to(device)
+            )
+        else:
+            avs = tpcav_model.forward_until_select_layer(seq.to(device))
         avs_residual, avs_projected = tpcav_model.project_avs_to_pca(
             avs.flatten(start_dim=1).to(device)
         )
@@ -160,11 +165,17 @@ def main():
             avs_residual, repeats=args.num_baselines_per_sample, dim=0
         )
         bseq = bseq[: (avs.shape[0] * args.num_baselines_per_sample)]
+        bchrom = bchrom[: (avs.shape[0] * args.num_baselines_per_sample)]
 
         # do normal model forward on baselines to get activations
-        bavs = tpcav_model.forward_until_select_layer(
-            utils.seq_transform_fn(bseq.to(device))
-        )
+        bseq = utils.seq_transform_fn(bseq)
+        bchrom = utils.chrom_transform_fn(bchrom)
+        if bchrom is not None:
+            bavs = tpcav_model.forward_until_select_layer(
+                bseq.to(device), bchrom.to(device)
+            )
+        else:
+            bavs = tpcav_model.forward_until_select_layer(bseq.to(device))
         bavs_residual, bavs_projected = tpcav_model.project_avs_to_pca(
             bavs.flatten(start_dim=1).to(device)
         )

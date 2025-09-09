@@ -13,6 +13,7 @@ import seqchromloader as scl
 import torch
 from Bio import SeqIO
 from deeplift.dinuc_shuffle import dinuc_shuffle
+from models import ConvTowerDomain_v6
 from pybedtools import BedTool
 from pyfaidx import Fasta
 from seq_utils import insert_motif_into_seq, insert_region_into_seq
@@ -26,19 +27,41 @@ def seq_transform_fn(seq_one_hot):
     return seq_one_hot
 
 
+def get_mean_and_std(bws):
+    ms = []
+    stds = []
+    for bwf in bws:
+        mean, std = scl.utils.compute_mean_std_bigwig(bwf)
+        ms.append(mean)
+        stds.append(std)
+        print(f"{bwf} Mean: {mean}, Standard Deviation {std} from {bwf}")
+    return ms, stds
+
+
+def default_chroms_transform(c, mean: list, std: list):
+    return (c - np.array(mean, dtype=np.float32)[np.newaxis, :, np.newaxis]) / np.array(
+        std, dtype=np.float32
+    )[np.newaxis, :, np.newaxis]
+
+
+def chrom_transform_fn(chrom_signal):
+    "TODO: chrom_signal is of shape [batch_size, num_bigwigs, len], modify this function if you want to do some transformation on chromatin signal, if your model does not use chromatin signal, just return None"
+
+    mean, std = get_mean_and_std(["data/DNASE.H1-hESC.fc.signal.bigwig"])
+
+    chrom_signal = default_chroms_transform(chrom_signal, mean, std)
+
+    return chrom_signal
+
+
 def load_model():
     "TODO: Please load your model here"
 
+    model = ConvTowerDomain_v6.load_from_checkpoint(
+        "data/ENCODE_cell_H1-hESC_chip_MAX_seqchrom_checkpoint_epoch=25-val_loss=0.190399.ckpt"
+    )
+
     return model
-
-
-def expand_dataframe(df, target_len=196_608):
-    "expand interval dataframe to target length"
-    halfR = int(target_len / 2)
-    df = df.assign(mid=lambda x: ((x["start"] + x["end"]) / 2).astype(int)).assign(
-        start=lambda x: x["mid"] - halfR, end=lambda x: x["mid"] + halfR
-    )  # center 2*halfR window
-    return df[["chrom", "start", "end"]]
 
 
 def split_dataframe(df, chunk_size=10000):
@@ -271,9 +294,10 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
 def center_windows(df, window_len=1024):
     "Get center window_len bp region of the given coordinate dataframe, input dataframe must have start and end colums"
     halfR = int(window_len / 2)
-    return df.assign(mid=lambda x: ((x["start"] + x["end"]) / 2).astype(int)).assign(
+    df = df.assign(mid=lambda x: ((x["start"] + x["end"]) / 2).astype(int)).assign(
         start=lambda x: x["mid"] - halfR, end=lambda x: x["mid"] + halfR
     )
+    return df[["chrom", "start", "end"]]
 
 
 def collate_seq(batch):
@@ -325,6 +349,102 @@ class WrappedDataLoader:
             dl2 = self.dl2
         for b1, b2 in zip(dl1, dl2):
             yield (self.func(b1, b2))
+
+
+def seq_dataloader_from_bed(
+    seq_bed, genome_fasta, window_len=1024, batch_size=8, num_workers=0
+):
+    seq_df = pd.read_table(
+        seq_bed,
+        header=None,
+        usecols=[0, 1, 2],
+        names=["chrom", "start", "end"],
+    )
+
+    return seq_dataloader_from_dataframe(
+        seq_df, genome_fasta, window_len, batch_size, num_workers
+    )
+
+
+def seq_dataloader_from_dataframe(
+    seq_df, genome_fasta, window_len=1024, batch_size=8, num_workers=0
+):
+    seq_df = center_windows(seq_df, window_len=window_len)
+    seq_df["label"] = -1
+    seq_df["strand"] = "+"
+    print(f"Filtering out concept samples that don't exist in the genome...")
+    seq_df = scl.filter_chromosomes(seq_df, to_keep=Fasta(genome_fasta).keys())
+    dl = scl.SeqChromDatasetByDataFrame(
+        seq_df,
+        genome_fasta=genome_fasta,
+        dataloader_kws={
+            "batch_size": batch_size,
+            "num_workers": num_workers,
+            "collate_fn": collate_seq,
+            "drop_last": True,
+        },
+    )
+    return dl
+
+
+def seq_dataloader_from_fa(seq_fa, input_window_length=1024, batch_size=8):
+    with open(seq_fa) as handle:
+        dnaSeqs = []
+        for record in SeqIO.parse(handle, "fasta"):
+            if len(record.seq) != input_window_length:
+                raise Exception(
+                    "Sequence length not equal to input_window_length, got {len(record.seq)}"
+                )
+            dnaSeqs.append(torch.tensor(scl.dna2OneHot(record.seq)))
+            if len(dnaSeqs) >= batch_size:
+                yield torch.stack(dnaSeqs)
+                dnaSeqs = []
+
+        if len(dnaSeqs) > 0:
+            yield torch.stack(dnaSeqs)
+
+
+def chrom_dataloader_from_bed(
+    chrom_bed, genome_fasta, input_window_length=1024, bigwigs=[], batch_size=8
+):
+    chrom_df = pd.read_table(
+        chrom_bed,
+        header=None,
+        usecols=[0, 1, 2],
+        names=["chrom", "start", "end"],
+    )
+
+    return chrom_dataloader_from_dataframe(
+        chrom_df, genome_fasta, input_window_length, bigwigs, batch_size
+    )
+
+
+def chrom_dataloader_from_dataframe(
+    chrom_df,
+    genome_fasta,
+    input_window_length=1024,
+    bigwigs=[],
+    batch_size=8,
+    num_workers=0,
+):
+    chrom_df = center_windows(chrom_df, window_len=input_window_length)
+    chrom_df["label"] = -1
+    chrom_df["strand"] = "+"
+    # print(f"Filtering out concept samples that don't exist in the genome...")
+    chrom_df = scl.filter_chromosomes(chrom_df, to_keep=Fasta(genome_fasta).keys())
+    dl = scl.SeqChromDatasetByDataFrame(
+        chrom_df,
+        genome_fasta=genome_fasta,
+        bigwig_filelist=bigwigs,
+        dataloader_kws={
+            "batch_size": batch_size,
+            "num_workers": num_workers,
+            "collate_fn": collate_chrom,
+            "drop_last": True,
+        },
+    )
+
+    return dl
 
 
 class SeqChromConcept:

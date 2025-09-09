@@ -22,7 +22,6 @@ import webdataset as wds
 from Bio import motifs
 from captum.concept import Classifier, Concept
 from cuml import SGD as cuml_SGD
-from deeplift.dinuc_shuffle import dinuc_shuffle
 from generate_motif_concepts_v3 import CustomMotif
 from scipy.linalg import svd
 from sklearn.linear_model import SGDClassifier
@@ -373,10 +372,23 @@ def main():
         help="Motif file in MEME minimal format",
     )
     parser.add_argument(
-        "--bed-concepts",
+        "--bed-seq-concepts",
         type=str,
         default=None,
-        help="Bed file of regions provided as concepts, format: [chrom, start, end, strand, concept_name]",
+        help="Bed file of regions provided as sequence concepts, format: [chrom, start, end, strand, concept_name]",
+    )
+    parser.add_argument(
+        "--bed-chrom-concepts",
+        type=str,
+        default=None,
+        help="Bed file of regions provided as chromatin concepts, format: [chrom, start, end, strand, concept_name]",
+    )
+    parser.add_argument(
+        "--bws",
+        type=str,
+        nargs="+",
+        default=None,
+        help="List of bigwig files to extract chromatin signal from, use this option if your model takes chromatin data as input",
     )
     parser.add_argument(
         "--num-motifs", type=int, default=12, help="Number of motifs to insert"
@@ -386,6 +398,12 @@ def main():
         type=int,
         default=10,
         help="Number of samples per concept to draw to compute PCA matrix",
+    )
+    parser.add_argument(
+        "--max-samples",
+        type=int,
+        default=5000,
+        help="Maximum number of samples to draw for training classifier on each concept",
     )
     parser.add_argument(
         "--num-pc", default="full", help="Number of PCs to keep, or 'full' to keep all"
@@ -400,7 +418,6 @@ def main():
         default=False,
         help="Save activations per layer per concept",
     )
-    parser.add_argument("--dinuc-shuffle", action="store_true", default=False)
     args = parser.parse_args()
 
     if path.exists(args.output_dir):
@@ -427,22 +444,29 @@ def main():
     ## load control concepts first
     random_regions_fn = f"{args.output_dir}/random_regions.bed"
     random_regions_df = scl.random_coords(
-        gs=args.genome_size_file, l=args.input_window_length, n=5000
+        gs=args.genome_size_file, l=args.input_window_length, n=args.max_samples
     )
     random_regions_df.to_csv(random_regions_fn, sep="\t", header=False, index=False)
     control_concepts = []
-    control_sc_concept = utils.SeqChromConcept(
-        seq_bed=random_regions_fn,
-        seq_fa=None,
-        chrom_bed=random_regions_fn,
-        window_len=args.input_window_length,
-        genome_fasta=args.genome_fasta_file,
-        bws=None,
-        batch_size=BATCH_SIZE,
+
+    control_seq_dl = utils.seq_dataloader_from_bed(
+        random_regions_fn,
+        args.genome_fasta_file,
+        args.input_window_length,
+        BATCH_SIZE,
+    )
+    control_chrom_dl = utils.chrom_dataloader_from_bed(
+        random_regions_fn,
+        args.genome_fasta_file,
+        args.input_window_length,
+        args.bws,
+        BATCH_SIZE,
     )
 
     control_concept = Concept(
-        id=-idx, name="random_regions", data_iter=control_sc_concept.seq_dataloader()
+        id=-idx,
+        name="random_regions",
+        data_iter=zip(control_seq_dl, control_chrom_dl),
     )
     control_concepts.append(control_concept)
     idx += 1
@@ -456,7 +480,7 @@ def main():
             for m in f:
                 motif_name, consensus_seq = m.strip().split("\t")
                 motif = CustomMotif("motif", consensus_seq)
-                cn = (f"{motif_name}",)
+                cn = f"{motif_name}"
                 seq_dl = construct_motif_concept_dataloader_from_control(
                     random_regions_df,
                     args.genome_fasta_file,
@@ -465,7 +489,13 @@ def main():
                     batch_size=BATCH_SIZE,
                     infinite=False,
                 )
-                concepts.append(Concept(id=idx, name=cn, data_iter=seq_dl))
+                concepts.append(
+                    Concept(
+                        id=idx,
+                        name=cn,
+                        data_iter=zip(seq_dl, control_chrom_dl),
+                    )
+                )
                 idx += 1
     if args.meme_motifs is not None:
         with open(args.meme_motifs) as f:
@@ -479,25 +509,54 @@ def main():
                     batch_size=BATCH_SIZE,
                     infinite=False,
                 )
-                concepts.append(Concept(id=idx, name=cn, data_iter=seq_dl))
+                concepts.append(
+                    Concept(
+                        id=idx,
+                        name=cn,
+                        data_iter=zip(seq_dl, control_chrom_dl),
+                    )
+                )
                 idx += 1
-    if args.bed_concepts is not None:
-        bed_df = pd.read_table(
-            args.bed_concepts,
+    if args.bed_seq_concepts is not None:
+        bed_seq_df = pd.read_table(
+            args.bed_seq_concepts,
             header=None,
             usecols=[0, 1, 2, 3, 4],
             names=["chrom", "start", "end", "strand", "concept_name"],
         )
-        for cn in bed_df.concept_name.unique():
-            cn_bed_df = bed_df.loc[bed_df.concept_name == cn]
-            seq_dl = construct_bed_concept_dataloader_from_control(
-                random_regions_df,
+        for cn in bed_seq_df.concept_name.unique():
+            cn_bed_df = bed_seq_df.loc[bed_seq_df.concept_name == cn]
+            seq_dl = utils.seq_dataloader_from_dataframe(
+                cn_bed_df,
                 args.genome_fasta_file,
-                regions_df=cn_bed_df,
-                batch_size=BATCH_SIZE,
-                infinite=False,
+                args.input_window_length,
+                BATCH_SIZE,
+                num_workers=0,
             )
-            concepts.append(Concept(id=idx, name=cn, data_iter=seq_dl))
+            concepts.append(
+                Concept(id=idx, name=cn, data_iter=zip(seq_dl, control_chrom_dl))
+            )
+            idx += 1
+
+    if args.bed_chrom_concepts is not None:
+        bed_chrom_df = pd.read_table(
+            args.bed_chrom_concepts,
+            header=None,
+            usecols=[0, 1, 2, 3, 4],
+            names=["chrom", "start", "end", "strand", "concept_name"],
+        )
+        for cn in bed_chrom_df.concept_name.unique():
+            cn_bed_df = bed_chrom_df.loc[bed_chrom_df.concept_name == cn]
+            chrom_dl = utils.chrom_dataloader_from_dataframe(
+                cn_bed_df,
+                args.genome_fasta_file,
+                args.input_window_length,
+                BATCH_SIZE,
+                num_workers=0,
+            )
+            concepts.append(
+                Concept(id=idx, name=cn, data_iter=zip(control_seq_dl, chrom_dl))
+            )
             idx += 1
 
     logger.info("Constructed concepts")
@@ -507,12 +566,15 @@ def main():
     def get_activation(concept, num_samples=10):
         avs = []
         num = 0
-        for seq in concept.data_iter:
+        for seq, chrom in concept.data_iter:
             # print(seq)
             # print(concept)
-            av = model.forward_until_select_layer(
-                utils.seq_transform_fn(seq.to(device))
-            )
+            seq = utils.seq_transform_fn(seq)
+            chrom = utils.chrom_transform_fn(chrom)
+            if chrom is not None:
+                av = model.forward_until_select_layer(seq.to(device), chrom.to(device))
+            else:
+                av = model.forward_until_select_layer(seq.to(device))
             avs.append(av.detach().cpu())
             num += av.shape[0]
             if num >= num_samples:
@@ -569,26 +631,15 @@ def main():
     # set to eval mode for sanity
     model.eval()
 
-    def get_tpcav_activations(concept, shuffle=False):
+    def get_tpcav_activations(concept):
         avs_pca = []
-        for seq in concept.data_iter:
-            if shuffle:
-                seq_shuffled = []
-                for s in seq:
-                    s = torch.tensor(
-                        dinuc_shuffle(torch.swapaxes(s, 0, 1).numpy())
-                    )  # l, c
-                    s = torch.swapaxes(s, 0, 1)  # c, l
-                    seq_shuffled.append(s)
-                seq_shuffled = torch.stack(seq_shuffled)
-                assert seq_shuffled.shape[1] == 4
-                av = model.forward_until_select_layer(
-                    utils.seq_transform_fn(seq_shuffled.to(device))
-                )
+        for seq, chrom in concept.data_iter:
+            seq = utils.seq_transform_fn(seq)
+            chrom = utils.chrom_transform_fn(chrom)
+            if chrom is not None:
+                av = model.forward_until_select_layer(seq.to(device), chrom.to(device))
             else:
-                av = model.forward_until_select_layer(
-                    utils.seq_transform_fn(seq.to(device))
-                )
+                av = model.forward_until_select_layer(seq.to(device))
             av_residual, av_projected = model.project_avs_to_pca(
                 av.flatten(start_dim=1)
             )
@@ -617,12 +668,12 @@ def main():
         except RuntimeError as e:
             print(c)
             raise e
-        if args.dinuc_shuffle:
-            control_avs = get_tpcav_activations(c, shuffle=True)
-            cp = {0: test_avs, 1: control_avs}
-            dir_name = f"{args.output_dir}/cavs/{c.name}_control_dinuc_shuffle"
+        for cc in control_concepts:
+            cp = {0: test_avs, 1: control_concept_avs[cc.name]}
+            dir_name = f"{args.output_dir}/cavs/{c.name}_control_{cc.name}"
             os.makedirs(dir_name, exist_ok=True)
             concept_pair = (cp, args, dir_name, args.SGD_penalty)
+
             while len(pending) >= max_pending_jobs:
                 for job in pending:
                     if job.ready():
@@ -633,29 +684,9 @@ def main():
                     time.sleep(1)
             async_result = pool.apply_async(train_classifier, args=concept_pair)
             logging.info(
-                f"Started training classifier for concept {c.name} vs dinuc-shuffle control"
+                f"Started training classifier for concept {c.name} vs control {cc.name}"
             )
             pending.append(async_result)
-        else:
-            for cc in control_concepts:
-                cp = {0: test_avs, 1: control_concept_avs[cc.name]}
-                dir_name = f"{args.output_dir}/cavs/{c.name}_control_{cc.name}"
-                os.makedirs(dir_name, exist_ok=True)
-                concept_pair = (cp, args, dir_name, args.SGD_penalty)
-
-                while len(pending) >= max_pending_jobs:
-                    for job in pending:
-                        if job.ready():
-                            job.get()  # raise exception if any
-                    # keep all pending jobs
-                    pending = [job for job in pending if not job.ready()]
-                    if len(pending) >= max_pending_jobs:
-                        time.sleep(1)
-                async_result = pool.apply_async(train_classifier, args=concept_pair)
-                logging.info(
-                    f"Started training classifier for concept {c.name} vs control {cc.name}"
-                )
-                pending.append(async_result)
 
         del c
 
