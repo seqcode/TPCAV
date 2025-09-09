@@ -22,7 +22,6 @@ import webdataset as wds
 from Bio import motifs
 from captum.concept import Classifier, Concept
 from cuml import SGD as cuml_SGD
-from generate_motif_concepts_v3 import CustomMotif
 from scipy.linalg import svd
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import GridSearchCV
@@ -42,7 +41,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel("INFO")
 logger.info("TCAV~")
 
-import models
 import numpy as np
 import seqchromloader as scl
 import utils
@@ -479,7 +477,7 @@ def main():
 
             for m in f:
                 motif_name, consensus_seq = m.strip().split("\t")
-                motif = CustomMotif("motif", consensus_seq)
+                motif = utils.CustomMotif("motif", consensus_seq)
                 cn = f"{motif_name}"
                 seq_dl = construct_motif_concept_dataloader_from_control(
                     random_regions_df,

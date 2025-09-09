@@ -107,8 +107,7 @@ def iterate_seq_df_chunk(
         if "N" in seq:
             if print_warning:
                 print(f"Skip {item.chrom}:{item.start}-{item.end} due to containing N")
-            continue
-        elif len(unique_chars) == 0:
+            continue elif len(unique_chars) == 0:
             if print_warning:
                 print(
                     f"Skip region {item.chrom}:{item.start}-{item.end} due to no sequences avaiable"
@@ -604,3 +603,18 @@ def create_dataloader_from_bed(
     )
 
     return target_dl
+
+class CustomMotif:
+    def __init__(self, name, consensus):
+        self.name = name
+        self.matrix_id = "custom"
+        self.consensus = consensus.upper()
+        self.rc = False
+
+    def __len__(self):
+        return len(self.consensus)
+
+    def reverse_complement(self):
+        self.consensus = Bio.Seq.reverse_complement(self.consensus)
+        return self
+
