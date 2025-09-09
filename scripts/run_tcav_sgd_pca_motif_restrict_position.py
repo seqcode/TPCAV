@@ -154,6 +154,10 @@ def main():
     control_concepts.append(control_concept)
     idx += 1
 
+    # load tpcav model
+    model = torch.load(args.tpcav_model, map_location=device)
+    model.eval()
+
     ## load test concepts
     concepts = []
 
@@ -211,10 +215,6 @@ def main():
 
     logger.info("Constructed concepts")
     logger.info(concepts)
-
-    # load tpcav model
-    model = torch.load(args.tpcav_model, map_location=device)
-    model.eval()
 
     def get_tpcav_activations(concept):
         avs_pca = []
