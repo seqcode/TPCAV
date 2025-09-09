@@ -171,7 +171,7 @@ def main():
                     cn = f"{motif_name}_bin_{buffer_idx}"
                     seq_dl = construct_motif_concept_dataloader_from_control(
                         random_regions_df,
-                        args.genome_fasta,
+                        args.genome_fasta_file,
                         motif=motif,
                         num_motifs=args.num_motifs,
                         start_buffer=start_buffer,
@@ -193,7 +193,7 @@ def main():
                     cn = f"{motif.name.replace('/', '-')}_bin_{buffer_idx}"
                     seq_dl = construct_motif_concept_dataloader_from_control(
                         random_regions_df,
-                        args.genome_fasta,
+                        args.genome_fasta_file,
                         motif=motif,
                         num_motifs=args.num_motifs,
                         start_buffer=start_buffer,
