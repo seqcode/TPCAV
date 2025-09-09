@@ -96,6 +96,12 @@ def main():
         help="Maximum number of samples to draw for training classifier on each concept",
     )
     parser.add_argument(
+        "--bws",
+        nargs="+",
+        default=None,
+        help="List of bigwig files to extract chromatin signal from, use this option if your model takes chromatin data as input",
+    )
+    parser.add_argument(
         "--classifier", default="sgd", help="choose from sgd or cuml_sgd"
     )
     parser.add_argument("--SGD-penalty", default="l2", help="SGD penalty type")
