@@ -27,6 +27,18 @@ def seq_transform_fn(seq_one_hot):
     return seq_one_hot
 
 
+def chrom_transform_fn(chrom_signal):
+    "TODO: chrom_signal is of shape [batch_size, num_bigwigs, len], modify this function if you want to do some transformation on chromatin signal, if your model does not use chromatin signal, just return None"
+
+    return None
+
+
+def load_model():
+    "TODO: Please load your model here"
+
+    return model
+
+
 def get_mean_and_std(bws):
     ms = []
     stds = []
@@ -42,32 +54,6 @@ def default_chroms_transform(c, mean: list, std: list):
     return (c - np.array(mean, dtype=np.float32)[np.newaxis, :, np.newaxis]) / np.array(
         std, dtype=np.float32
     )[np.newaxis, :, np.newaxis]
-
-
-def chrom_transform_fn(chrom_signal):
-    "TODO: chrom_signal is of shape [batch_size, num_bigwigs, len], modify this function if you want to do some transformation on chromatin signal, if your model does not use chromatin signal, just return None"
-
-    mean = [
-        0.6935325543125703,
-    ]
-    std = [
-        0.9614679777484372,
-    ]
-    # mean, std = get_mean_and_std(["data/DNASE.H1-hESC.fc.signal.bigwig"])
-
-    chrom_signal = default_chroms_transform(chrom_signal, mean, std)
-
-    return chrom_signal
-
-
-def load_model():
-    "TODO: Please load your model here"
-
-    model = ConvTowerDomain_v6.load_from_checkpoint(
-        "data/ENCODE_cell_H1-hESC_chip_MAX_seqchrom_checkpoint_epoch=25-val_loss=0.190399.ckpt"
-    )
-
-    return model
 
 
 def split_dataframe(df, chunk_size=10000):
