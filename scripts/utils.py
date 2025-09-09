@@ -47,7 +47,13 @@ def default_chroms_transform(c, mean: list, std: list):
 def chrom_transform_fn(chrom_signal):
     "TODO: chrom_signal is of shape [batch_size, num_bigwigs, len], modify this function if you want to do some transformation on chromatin signal, if your model does not use chromatin signal, just return None"
 
-    mean, std = get_mean_and_std(["data/DNASE.H1-hESC.fc.signal.bigwig"])
+    mean = [
+        0.6935325543125703,
+    ]
+    std = [
+        0.9614679777484372,
+    ]
+    # mean, std = get_mean_and_std(["data/DNASE.H1-hESC.fc.signal.bigwig"])
 
     chrom_signal = default_chroms_transform(chrom_signal, mean, std)
 
@@ -107,7 +113,8 @@ def iterate_seq_df_chunk(
         if "N" in seq:
             if print_warning:
                 print(f"Skip {item.chrom}:{item.start}-{item.end} due to containing N")
-            continue elif len(unique_chars) == 0:
+            continue
+        elif len(unique_chars) == 0:
             if print_warning:
                 print(
                     f"Skip region {item.chrom}:{item.start}-{item.end} due to no sequences avaiable"
@@ -371,7 +378,7 @@ def seq_dataloader_from_dataframe(
     seq_df = center_windows(seq_df, window_len=window_len)
     seq_df["label"] = -1
     seq_df["strand"] = "+"
-    print(f"Filtering out concept samples that don't exist in the genome...")
+    # print(f"Filtering out concept samples that don't exist in the genome...")
     seq_df = scl.filter_chromosomes(seq_df, to_keep=Fasta(genome_fasta).keys())
     dl = scl.SeqChromDatasetByDataFrame(
         seq_df,
@@ -483,7 +490,7 @@ class SeqChromConcept:
             seq_df = center_windows(seq_df, window_len=self.window_len)
             seq_df["label"] = -1
             seq_df["strand"] = "+"
-            print(f"Filtering out concept samples that don't exist in the genome...")
+            # print(f"Filtering out concept samples that don't exist in the genome...")
             seq_df = scl.filter_chromosomes(
                 seq_df, to_keep=Fasta(self.genome_fasta).keys()
             )
@@ -604,6 +611,7 @@ def create_dataloader_from_bed(
 
     return target_dl
 
+
 class CustomMotif:
     def __init__(self, name, consensus):
         self.name = name
@@ -617,4 +625,3 @@ class CustomMotif:
     def reverse_complement(self):
         self.consensus = Bio.Seq.reverse_complement(self.consensus)
         return self
-

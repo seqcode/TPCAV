@@ -263,6 +263,7 @@ def construct_motif_concept_dataloader_from_control(
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=True,
+        drop_last=True,
     )
 
     return dl
@@ -289,6 +290,7 @@ def construct_bed_concept_dataloader_from_control(
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=True,
+        drop_last=True,
     )
 
     return dl
@@ -383,7 +385,6 @@ def main():
     )
     parser.add_argument(
         "--bws",
-        type=str,
         nargs="+",
         default=None,
         help="List of bigwig files to extract chromatin signal from, use this option if your model takes chromatin data as input",
@@ -396,6 +397,12 @@ def main():
         type=int,
         default=10,
         help="Number of samples per concept to draw to compute PCA matrix",
+    )
+    parser.add_argument(
+        "--min-samples",
+        type=int,
+        default=100,
+        help="Minimum number of samples required, this would apply to bed concepts",
     )
     parser.add_argument(
         "--max-samples",
@@ -523,9 +530,14 @@ def main():
             names=["chrom", "start", "end", "strand", "concept_name"],
         )
         for cn in bed_seq_df.concept_name.unique():
-            cn_bed_df = bed_seq_df.loc[bed_seq_df.concept_name == cn]
+            cn_bed_seq_df = bed_seq_df.loc[bed_seq_df.concept_name == cn]
+            if len(cn_bed_seq_df) < args.min_samples:
+                logger.warning(
+                    f"Concept {cn} has only {len(cn_bed_seq_df)} samples, less than minimum required {args.min_samples}, skip"
+                )
+                continue
             seq_dl = utils.seq_dataloader_from_dataframe(
-                cn_bed_df,
+                cn_bed_seq_df,
                 args.genome_fasta_file,
                 args.input_window_length,
                 BATCH_SIZE,
@@ -544,11 +556,17 @@ def main():
             names=["chrom", "start", "end", "strand", "concept_name"],
         )
         for cn in bed_chrom_df.concept_name.unique():
-            cn_bed_df = bed_chrom_df.loc[bed_chrom_df.concept_name == cn]
+            cn_bed_chrom_df = bed_chrom_df.loc[bed_chrom_df.concept_name == cn]
+            if len(cn_bed_chrom_df) < args.min_samples:
+                logger.warning(
+                    f"Concept {cn} has only {len(cn_bed_chrom_df)} samples, less than minimum required {args.min_samples}, skip"
+                )
+                continue
             chrom_dl = utils.chrom_dataloader_from_dataframe(
-                cn_bed_df,
+                cn_bed_chrom_df,
                 args.genome_fasta_file,
                 args.input_window_length,
+                args.bws,
                 BATCH_SIZE,
                 num_workers=0,
             )

@@ -32,7 +32,8 @@ Analysis pipeline for TPCAV
 ```bash
 srun -n1 -c8 --gres=gpu:1 --mem=128G python scripts/run_tcav_sgd_pca.py \
   cavs_test 1024 data/hg19.fa data/hg19.fa.fai \
-  --meme-motifs data/motif-clustering-v2.1beta_consensus_pwms.test.meme
+  --meme-motifs data/motif-clustering-v2.1beta_consensus_pwms.test.meme \
+  --bed-chrom-concepts data/ENCODE_DNase_peaks.bed
 ```
 
 3. Then compute the layer attributions, example command:

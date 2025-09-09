@@ -244,15 +244,15 @@ class ConvTowerDomain_v6(pl.LightningModule):
         # self.register_buffer("pca_inv", None)
         # self.orig_shape = None
 
-    def forward(self, seq):
-        seq = self.seq_stem(seq)
-        seq = self.seq_conv_tower(seq)
-        y_hat = seq
-        y_hat = self.pre_attn(y_hat)
-        y_hat = self.transformer_encoder(y_hat)
-        y_hat = self.post_attn(y_hat)
-        y_pred = self.main_pred(y_hat)
-        return y_pred
+    # def forward(self, seq):
+    #    seq = self.seq_stem(seq)
+    #    seq = self.seq_conv_tower(seq)
+    #    y_hat = seq
+    #    y_hat = self.pre_attn(y_hat)
+    #    y_hat = self.transformer_encoder(y_hat)
+    #    y_hat = self.post_attn(y_hat)
+    #    y_pred = self.main_pred(y_hat)
+    #    return y_pred
 
     def merge_projected_and_residual(self, y_projected, y_residual):
         "Project PCA activations back to original space and add with residual, then multiply with zscore_std"
@@ -262,10 +262,12 @@ class ConvTowerDomain_v6(pl.LightningModule):
 
         return y_hat
 
-    def forward_until_select_layer(self, seq):
+    def forward_until_select_layer(self, seq, chrom):
         seq = self.seq_stem(seq)
         seq = self.seq_conv_tower(seq)
-        y_hat = seq
+        chrom = self.chrom_stem(chrom)
+        chrom = self.chrom_conv_tower(chrom)
+        y_hat = torch.cat([seq, chrom], dim=1)
         y_hat = self.pre_attn(y_hat)
         y_hat = self.transformer_encoder(y_hat)
         y_hat = self.post_attn(y_hat)
@@ -278,12 +280,13 @@ class ConvTowerDomain_v6(pl.LightningModule):
     def forward_from_start(
         self,
         seq,
+        chrom,
         cavs_list=None,
         mute_x_avs=False,
         mute_remainder=False,
         project_to_pca=True,
     ):
-        y_hat = self.forward_until_select_layer(seq)
+        y_hat = self.forward_until_select_layer(seq, chrom)
 
         if project_to_pca:
             avs_residual, avs_projected = self.project_post_attn_to_pca(
