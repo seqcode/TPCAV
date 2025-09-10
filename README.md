@@ -26,6 +26,9 @@ Analysis pipeline for TPCAV
     - Function `seq_transform_fn` in utils.py
         - By default the dataloader provides one hot coded DNA array of shape (batch_size, 4, len), coded in the order [A, C, G, T], if your model takes a different kind of input, modify `seq_transform_fn` to transform the input
 
+    - Function `chrom_transform_fn` in utils.py
+        - By default the dataloader provides signal array from bigwig files of shape (batch_size, # bigwigs, len), if your model takes a different kind of chromatin input, modify `chrom_transform_fn` to transform the input, if your model is sequence only, leave it to return None.
+
 
 2. Compute CAVs on your model, example command:
 
