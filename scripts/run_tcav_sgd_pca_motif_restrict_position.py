@@ -255,7 +255,7 @@ def main():
             raise e
         for cc in control_concepts:
             cp = {0: test_avs, 1: control_concept_avs[cc.name]}
-            dir_name = f"{args.output_dir}/cavs/{c.name}_control_{cc.name}"
+            dir_name = f"{args.output_dir}/{c.name}_control_{cc.name}"
             os.makedirs(dir_name, exist_ok=True)
             concept_pair = (cp, args, dir_name, args.SGD_penalty)
 
