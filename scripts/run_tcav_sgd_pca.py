@@ -245,6 +245,7 @@ def construct_motif_concept_dataloader_from_control(
     genome_fasta,
     motif,
     num_motifs=128,
+    motif_mode='pwm',
     start_buffer=0,
     end_buffer=0,
     batch_size=8,
@@ -259,6 +260,7 @@ def construct_motif_concept_dataloader_from_control(
             genome_fasta,
             motif=motif,
             num_motifs=num_motifs,
+            motif_mode=motif_mode,
             start_buffer=start_buffer,
             end_buffer=end_buffer,
             print_warning=False,
@@ -495,6 +497,7 @@ def main():
                     args.genome_fasta_file,
                     motif=motif,
                     num_motifs=args.num_motifs,
+                    motif_mode='consensus',
                     batch_size=BATCH_SIZE,
                     infinite=False,
                 )
@@ -515,6 +518,7 @@ def main():
                     args.genome_fasta_file,
                     motif=motif,
                     num_motifs=args.num_motifs,
+                    motif_mode='pwm',
                     batch_size=BATCH_SIZE,
                     infinite=False,
                 )
