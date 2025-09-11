@@ -152,6 +152,7 @@ def insert_motif_into_seq(
     rng=np.random.default_rng(1),
     mode="consensus",
 ):
+    assert mode in ["consensus", "pwm"]
 
     seq_ins = list(deepcopy(seq))
     pos_motif_overlap = np.ones(len(seq))
