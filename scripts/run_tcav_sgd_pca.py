@@ -405,16 +405,10 @@ def main():
         help="Number of samples per concept to draw to compute PCA matrix",
     )
     parser.add_argument(
-        "--min-samples",
-        type=int,
-        default=100,
-        help="Minimum number of samples required, this would apply to bed concepts",
-    )
-    parser.add_argument(
-        "--max-samples",
+        "--num-samples",
         type=int,
         default=5000,
-        help="Maximum number of samples to draw for training classifier on each concept",
+        help="Number of samples required for each concept to train classifiers, this would apply to filter out bed concepts that don't have enough samples",
     )
     parser.add_argument(
         "--num-pc", default="full", help="Number of PCs to keep, or 'full' to keep all"
@@ -455,7 +449,7 @@ def main():
     ## load control concepts first
     random_regions_fn = f"{args.output_dir}/random_regions.bed"
     random_regions_df = scl.random_coords(
-        gs=args.genome_size_file, l=args.input_window_length, n=args.max_samples
+        gs=args.genome_size_file, l=args.input_window_length, n=args.num_samples
     )
     random_regions_df.to_csv(random_regions_fn, sep="\t", header=False, index=False)
     control_concepts = []
@@ -539,9 +533,9 @@ def main():
         )
         for cn in bed_seq_df.concept_name.unique():
             cn_bed_seq_df = bed_seq_df.loc[bed_seq_df.concept_name == cn]
-            if len(cn_bed_seq_df) < args.min_samples:
+            if len(cn_bed_seq_df) < args.num_samples:
                 logger.warning(
-                    f"Concept {cn} has only {len(cn_bed_seq_df)} samples, less than minimum required {args.min_samples}, skip"
+                    f"Concept {cn} has only {len(cn_bed_seq_df)} samples, less than minimum required {args.num_samples}, skip"
                 )
                 continue
             seq_dl = utils.seq_dataloader_from_dataframe(
@@ -565,9 +559,9 @@ def main():
         )
         for cn in bed_chrom_df.concept_name.unique():
             cn_bed_chrom_df = bed_chrom_df.loc[bed_chrom_df.concept_name == cn]
-            if len(cn_bed_chrom_df) < args.min_samples:
+            if len(cn_bed_chrom_df) < args.num_samples:
                 logger.warning(
-                    f"Concept {cn} has only {len(cn_bed_chrom_df)} samples, less than minimum required {args.min_samples}, skip"
+                    f"Concept {cn} has only {len(cn_bed_chrom_df)} samples, less than minimum required {args.num_samples}, skip"
                 )
                 continue
             chrom_dl = utils.chrom_dataloader_from_dataframe(
