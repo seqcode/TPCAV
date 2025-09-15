@@ -612,10 +612,10 @@ def main():
     # Zscore standardication
     avs_mean = sampled_avs.mean(dim=0)
     avs_std = sampled_avs.std(dim=0)
-    avs_standardized = (sampled_avs - avs_mean) / avs_std
     avs_std[avs_std == 0] = (
         -1
     )  # to avoid division by zero when all values are the same along a dimension
+    avs_standardized = (sampled_avs - avs_mean) / avs_std
     logger.warning(f"Activation matrix is of shape {avs_standardized.shape}")
     torch.save(avs_standardized, f"{args.output_dir}/avs_standardized.pt")
     # PCA

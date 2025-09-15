@@ -219,11 +219,11 @@ def main():
                 .cpu()
             )
         else:
-            target_preds.append(tpcav_model(avs_residual.to(device), None))
-            baseline_preds.append(tpcav_model(bavs_residual.to(device), None))
+            target_preds.append(tpcav_model(avs_residual.to(device), None).detach().cpu())
+            baseline_preds.append(tpcav_model(bavs_residual.to(device), None).detach().cpu())
 
         with torch.no_grad():
-            del avs_projected, bseq, attribution
+            del avs, avs_projected, avs_residual, bavs, bavs_projected, bavs_residual, seq, chrom, bseq, bchrom, attribution
             torch.cuda.empty_cache()
 
     print(f"Average target predictions: {torch.concat(target_preds).mean()}")
