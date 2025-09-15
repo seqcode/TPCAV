@@ -2,6 +2,14 @@
 
 Analysis pipeline for TPCAV
 
+## Dependencies
+
+You can use your own environment for the model, in addition, you need to install the following packages:
+
+- captum 0.7
+- seqchromloader 0.8.5
+- scikit-learn 1.5.2
+
 ## Workflow
 
 1. Since not every saved pytorch model stores the computation graph, you need to manually add functions to let the script know how to get the activations of the intermediate layer and how to proceed from there.

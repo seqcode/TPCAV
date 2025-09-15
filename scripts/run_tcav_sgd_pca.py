@@ -21,7 +21,6 @@ import torch
 import webdataset as wds
 from Bio import motifs
 from captum.concept import Classifier, Concept
-from cuml import SGD as cuml_SGD
 from scipy.linalg import svd
 from sklearn.linear_model import SGDClassifier
 from sklearn.model_selection import GridSearchCV
@@ -106,63 +105,6 @@ class SGD(Classifier):
         return self.lm.classes_
 
 
-class CUML_SGD(Classifier):
-    def __init__(self, handle=None):
-        alpha_list = [1e-2, 1e-4, 1e-6]
-        self.candidate_lms = [
-            cuml_SGD(
-                loss="hinge",
-                penalty="l2",
-                alpha=alpha,
-                batch_size=32,
-                learning_rate="adaptive",
-                n_iter_no_change=5,
-                handle=handle,
-            )
-            for alpha in alpha_list
-        ]
-        self.lm = None
-        # self.parameters = {"alpha": [1e-3, 1e-4, 1e-5]}
-        # self.parameters = {"alpha": [1e-4]}
-        # self.search = GridSearchCV(self.lm, self.parameters)
-
-    def train_and_eval(self, train_dataloader, val_dataloader):
-        time_start = time.time()
-        # get all train tensors and convert into numpy
-        train_avs, train_ls = load_all_tensors_to_numpy([train_dataloader])
-        val_avs, val_ls = load_all_tensors_to_numpy([val_dataloader])
-        # fit
-        for lm in self.candidate_lms:
-            lm.fit(train_avs, train_ls)
-        # evaluate each classifier
-        best_estimator = None
-        best_acc = -1
-        for lm in self.candidate_lms:
-            acc = (lm.predict(val_avs) == val_ls).sum() / len(val_ls)
-            if acc > best_acc:
-                best_acc = acc
-                best_estimator = lm
-        self.lm = best_estimator
-
-        # self.lm = self.search.best_estimator_
-        # print status
-        time_end = time.time()
-        logger.info(f"SGD classifier trained in {(time_end - time_start):.4f}s")
-        # logger.info(f"Best Params of hyperparam search: {self.search.best_params_}")
-        logger.info(f"SGD iterations: {self.lm.n_iter_}")
-
-        return
-
-    def weights(self):
-        if len(self.lm.coef_) == 1:
-            return torch.tensor(np.array([-1 * self.lm.coef_[0], self.lm.coef_[0]]))
-        else:
-            return torch.tensor(self.lm.coef_)
-
-    def classes(self):
-        return self.lm.classes_
-
-
 # train linear classifier
 def train_classifier(avs, args, output_dir, sgd_penalty="l2"):
     train_avds = []
@@ -187,10 +129,7 @@ def train_classifier(avs, args, output_dir, sgd_penalty="l2"):
 
     input_dim = next(iter(train_avdl))[0].shape[1]
     logger.info(f"Layer activation input dimension is {input_dim}")
-    if args.classifier == "cuml_sgd":
-        classifier = CUML_SGD()
-    else:
-        classifier = SGD(penalty=sgd_penalty)
+    classifier = SGD(penalty=sgd_penalty)
     classifier.train_and_eval(train_avdl, val_avdl)
     logger.info(f"Trained classifier")
 
@@ -412,9 +351,6 @@ def main():
     )
     parser.add_argument(
         "--num-pc", default="full", help="Number of PCs to keep, or 'full' to keep all"
-    )
-    parser.add_argument(
-        "--classifier", default="sgd", help="choose from sgd or cuml_sgd"
     )
     parser.add_argument("--SGD-penalty", default="l2", help="SGD penalty type")
     parser.add_argument(
