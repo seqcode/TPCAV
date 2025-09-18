@@ -165,16 +165,18 @@ def main():
     ## custom motifs, use the first control concept as a template
     ### according to # bins, get the list of buffer
     breakpoints = [0, *args.bin_edges, args.input_window_length]
-    buffer_list = [(breakpoints[i], breakpoints[i+1]) for i in range(len(breakpoints)-1)]
+    bin_list = [(breakpoints[i], breakpoints[i+1]) for i in range(len(breakpoints)-1)]
 
     if args.custom_motifs is not None:
         with open(args.custom_motifs) as f:
 
             for m in f:
-                for buffer_idx, (start_buffer, end_buffer) in enumerate(buffer_list):
+                for buffer_idx, (bin_start, bin_end) in enumerate(buffer_list):
+                    start_buffer = bin_start
+                    end_buffer = args.input_window_length - bin_end
                     motif_name, consensus_seq = m.strip().split("\t")
                     motif = utils.CustomMotif("motif", consensus_seq)
-                    cn = f"{motif_name}_bin_start_{start_buffer}_end_{end_buffer}"
+                    cn = f"{motif_name}_bin_start_{bin_start}_end_{bin_end}"
                     seq_dl = construct_motif_concept_dataloader_from_control(
                         random_regions_df,
                         args.genome_fasta_file,
@@ -196,7 +198,9 @@ def main():
         with open(args.meme_motifs) as f:
             for motif in motifs.parse(f, fmt="MINIMAL"):
                 for buffer_idx, (start_buffer, end_buffer) in enumerate(buffer_list):
-                    cn = f"{motif.name.replace('/', '-')}_bin_{buffer_idx}"
+                    start_buffer = bin_start
+                    end_buffer = args.input_window_length - bin_end
+                    cn = f"{motif.name.replace('/', '-')}_bin_start_{bin_start}_end_{bin_end}"
                     seq_dl = construct_motif_concept_dataloader_from_control(
                         random_regions_df,
                         args.genome_fasta_file,
