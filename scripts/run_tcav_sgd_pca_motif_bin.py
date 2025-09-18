@@ -197,7 +197,7 @@ def main():
     if args.meme_motifs is not None:
         with open(args.meme_motifs) as f:
             for motif in motifs.parse(f, fmt="MINIMAL"):
-                for buffer_idx, (start_buffer, end_buffer) in enumerate(buffer_list):
+                for buffer_idx, (bin_start, bin_end) in enumerate(buffer_list):
                     start_buffer = bin_start
                     end_buffer = args.input_window_length - bin_end
                     cn = f"{motif.name.replace('/', '-')}_bin_start_{bin_start}_end_{bin_end}"
