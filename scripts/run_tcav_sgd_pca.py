@@ -475,7 +475,7 @@ def main():
                 )
                 continue
             seq_dl = utils.seq_dataloader_from_dataframe(
-                cn_bed_seq_df,
+                cn_bed_seq_df.sample(n=args.num_samples),
                 args.genome_fasta_file,
                 args.input_window_length,
                 BATCH_SIZE,
@@ -501,7 +501,7 @@ def main():
                 )
                 continue
             chrom_dl = utils.chrom_dataloader_from_dataframe(
-                cn_bed_chrom_df,
+                cn_bed_chrom_df.sample(n=args.num_samples),
                 args.genome_fasta_file,
                 args.input_window_length,
                 args.bws,
