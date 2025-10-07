@@ -19,7 +19,7 @@ import pandas as pd
 import seqchromloader as scl
 import torch
 import webdataset as wds
-from Bio import motifs
+from Bio import motifs as Bio_motifs
 from captum.concept import Classifier, Concept
 from scipy.linalg import svd
 from sklearn.linear_model import SGDClassifier
@@ -450,7 +450,7 @@ def main():
             idx += 1
     if args.meme_motifs is not None:
         with open(args.meme_motifs) as f:
-            for motif in motifs.parse(f, fmt="MINIMAL"):
+            for motif in Bio_motifs.parse(f, fmt="MINIMAL"):
                 cn = f"{motif.name.replace('/', '-')}"
                 seq_dl = construct_motif_concept_dataloader_from_control(
                     random_regions_df,
