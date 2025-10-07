@@ -427,7 +427,7 @@ def main():
             motif_name = m
             consensus_seqs = df.loc[df.motif_name==m, 'consensus_seq'].tolist() # take all consensus seqs that correspond to the same motif name
             motifs = []
-            for i, c in consensus_seqs:
+            for i, c in enumerate(consensus_seqs):
                 motif = utils.CustomMotif(f"{m}_{i}", c)
                 motifs.append(motif)
             cn = f"{motif_name}"
