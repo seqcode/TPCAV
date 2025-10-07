@@ -323,12 +323,14 @@ def main():
     parser.add_argument(
         "--bed-seq-concepts",
         type=str,
+        nargs="+",
         default=None,
         help="Bed file of regions provided as sequence concepts, format: [chrom, start, end, strand, concept_name]",
     )
     parser.add_argument(
         "--bed-chrom-concepts",
         type=str,
+        nargs="+",
         default=None,
         help="Bed file of regions provided as chromatin concepts, format: [chrom, start, end, strand, concept_name]",
     )
@@ -468,57 +470,59 @@ def main():
                 )
                 idx += 1
     if args.bed_seq_concepts is not None:
-        bed_seq_df = pd.read_table(
-            args.bed_seq_concepts,
-            header=None,
-            usecols=[0, 1, 2, 3, 4],
-            names=["chrom", "start", "end", "strand", "concept_name"],
-        )
-        for cn in bed_seq_df.concept_name.unique():
-            cn_bed_seq_df = bed_seq_df.loc[bed_seq_df.concept_name == cn]
-            if len(cn_bed_seq_df) < args.num_samples:
-                logger.warning(
-                    f"Concept {cn} has only {len(cn_bed_seq_df)} samples, less than minimum required {args.num_samples}, skip"
+        for bed in args.bed_seq_concepts:
+            bed_seq_df = pd.read_table(
+                args.bed_seq_concepts,
+                header=None,
+                usecols=[0, 1, 2, 3, 4],
+                names=["chrom", "start", "end", "strand", "concept_name"],
+            )
+            for cn in bed_seq_df.concept_name.unique():
+                cn_bed_seq_df = bed_seq_df.loc[bed_seq_df.concept_name == cn]
+                if len(cn_bed_seq_df) < args.num_samples:
+                    logger.warning(
+                        f"Concept {cn} has only {len(cn_bed_seq_df)} samples, less than minimum required {args.num_samples}, skip"
+                    )
+                    continue
+                seq_dl = utils.seq_dataloader_from_dataframe(
+                    cn_bed_seq_df.sample(n=args.num_samples),
+                    args.genome_fasta_file,
+                    args.input_window_length,
+                    BATCH_SIZE,
+                    num_workers=0,
                 )
-                continue
-            seq_dl = utils.seq_dataloader_from_dataframe(
-                cn_bed_seq_df.sample(n=args.num_samples),
-                args.genome_fasta_file,
-                args.input_window_length,
-                BATCH_SIZE,
-                num_workers=0,
-            )
-            concepts.append(
-                Concept(id=idx, name=cn, data_iter=zip(seq_dl, control_chrom_dl))
-            )
-            idx += 1
+                concepts.append(
+                    Concept(id=idx, name=cn, data_iter=zip(seq_dl, control_chrom_dl))
+                )
+                idx += 1
 
     if args.bed_chrom_concepts is not None:
-        bed_chrom_df = pd.read_table(
-            args.bed_chrom_concepts,
-            header=None,
-            usecols=[0, 1, 2, 3, 4],
-            names=["chrom", "start", "end", "strand", "concept_name"],
-        )
-        for cn in bed_chrom_df.concept_name.unique():
-            cn_bed_chrom_df = bed_chrom_df.loc[bed_chrom_df.concept_name == cn]
-            if len(cn_bed_chrom_df) < args.num_samples:
-                logger.warning(
-                    f"Concept {cn} has only {len(cn_bed_chrom_df)} samples, less than minimum required {args.num_samples}, skip"
+        for bed in args.bed_chrom_concepts:
+            bed_chrom_df = pd.read_table(
+                args.bed_chrom_concepts,
+                header=None,
+                usecols=[0, 1, 2, 3, 4],
+                names=["chrom", "start", "end", "strand", "concept_name"],
+            )
+            for cn in bed_chrom_df.concept_name.unique():
+                cn_bed_chrom_df = bed_chrom_df.loc[bed_chrom_df.concept_name == cn]
+                if len(cn_bed_chrom_df) < args.num_samples:
+                    logger.warning(
+                        f"Concept {cn} has only {len(cn_bed_chrom_df)} samples, less than minimum required {args.num_samples}, skip"
+                    )
+                    continue
+                chrom_dl = utils.chrom_dataloader_from_dataframe(
+                    cn_bed_chrom_df.sample(n=args.num_samples),
+                    args.genome_fasta_file,
+                    args.input_window_length,
+                    args.bws,
+                    BATCH_SIZE,
+                    num_workers=0,
                 )
-                continue
-            chrom_dl = utils.chrom_dataloader_from_dataframe(
-                cn_bed_chrom_df.sample(n=args.num_samples),
-                args.genome_fasta_file,
-                args.input_window_length,
-                args.bws,
-                BATCH_SIZE,
-                num_workers=0,
-            )
-            concepts.append(
-                Concept(id=idx, name=cn, data_iter=zip(control_seq_dl, chrom_dl))
-            )
-            idx += 1
+                concepts.append(
+                    Concept(id=idx, name=cn, data_iter=zip(control_seq_dl, chrom_dl))
+                )
+                idx += 1
 
     logger.info("Constructed concepts")
     logger.info(concepts)
