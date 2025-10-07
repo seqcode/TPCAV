@@ -472,7 +472,7 @@ def main():
     if args.bed_seq_concepts is not None:
         for bed in args.bed_seq_concepts:
             bed_seq_df = pd.read_table(
-                args.bed_seq_concepts,
+                bed,
                 header=None,
                 usecols=[0, 1, 2, 3, 4],
                 names=["chrom", "start", "end", "strand", "concept_name"],
@@ -499,7 +499,7 @@ def main():
     if args.bed_chrom_concepts is not None:
         for bed in args.bed_chrom_concepts:
             bed_chrom_df = pd.read_table(
-                args.bed_chrom_concepts,
+                bed,
                 header=None,
                 usecols=[0, 1, 2, 3, 4],
                 names=["chrom", "start", "end", "strand", "concept_name"],
