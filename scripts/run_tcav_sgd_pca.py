@@ -182,7 +182,7 @@ def train_classifier(avs, args, output_dir, sgd_penalty="l2"):
 def construct_motif_concept_dataloader_from_control(
     control_seq_bed_df,
     genome_fasta,
-    motif,
+    motifs:list,
     num_motifs=128,
     motif_mode='pwm',
     start_buffer=0,
@@ -192,9 +192,9 @@ def construct_motif_concept_dataloader_from_control(
     infinite=False,
 ):
     "Construct a concept from control sequence bed file and insert motif sequence"
-    # take shard of the dataframe if specified
-    dl = torch.utils.data.DataLoader(
-        utils.IterateSeqDataFrame(
+    dss = []
+    for motif in motifs:
+        ds = utils.IterateSeqDataFrame(
             control_seq_bed_df,
             genome_fasta,
             motif=motif,
@@ -204,7 +204,11 @@ def construct_motif_concept_dataloader_from_control(
             end_buffer=end_buffer,
             print_warning=False,
             infinite=infinite,
-        ),
+        )
+        dss.append(ds)
+
+    dl = torch.utils.data.DataLoader(
+        wds.RandomMix(dss),
         batch_size=batch_size,
         num_workers=num_workers,
         pin_memory=True,
@@ -416,29 +420,32 @@ def main():
     concepts = []
     ## custom motifs, use the first control concept as a template
     if args.custom_motifs is not None:
-        with open(args.custom_motifs) as f:
-
-            for m in f:
-                motif_name, consensus_seq = m.strip().split("\t")
-                motif = utils.CustomMotif("motif", consensus_seq)
-                cn = f"{motif_name}"
-                seq_dl = construct_motif_concept_dataloader_from_control(
-                    random_regions_df,
-                    args.genome_fasta_file,
-                    motif=motif,
-                    num_motifs=args.num_motifs,
-                    motif_mode='consensus',
-                    batch_size=BATCH_SIZE,
-                    infinite=False,
+        df = pd.read_table(args.custom_motifs, names=['motif_name', 'consensus_seq'])
+        for m in np.unique(df.motif_name):
+            motif_name = m
+            consensus_seqs = df.loc[df.motif_name==m, 'consensus_seq'].tolist() # take all consensus seqs that correspond to the same motif name
+            motifs = []
+            for i, c in consensus_seqs:
+                motif = utils.CustomMotif(f"{m}_{i}", c)
+                motifs.append(motif)
+            cn = f"{motif_name}"
+            seq_dl = construct_motif_concept_dataloader_from_control(
+                random_regions_df,
+                args.genome_fasta_file,
+                motifs=motifs,
+                num_motifs=args.num_motifs,
+                motif_mode='consensus',
+                batch_size=BATCH_SIZE,
+                infinite=False,
+            )
+            concepts.append(
+                Concept(
+                    id=idx,
+                    name=cn,
+                    data_iter=zip(seq_dl, control_chrom_dl),
                 )
-                concepts.append(
-                    Concept(
-                        id=idx,
-                        name=cn,
-                        data_iter=zip(seq_dl, control_chrom_dl),
-                    )
-                )
-                idx += 1
+            )
+            idx += 1
     if args.meme_motifs is not None:
         with open(args.meme_motifs) as f:
             for motif in motifs.parse(f, fmt="MINIMAL"):
@@ -446,7 +453,7 @@ def main():
                 seq_dl = construct_motif_concept_dataloader_from_control(
                     random_regions_df,
                     args.genome_fasta_file,
-                    motif=motif,
+                    motifs=[motif],
                     num_motifs=args.num_motifs,
                     motif_mode='pwm',
                     batch_size=BATCH_SIZE,
