@@ -66,10 +66,6 @@ def main():
         help="Prefix of output file name for attributions saved in npz format",
     )
     parser.add_argument(
-        "output_key",
-        help="Which output should be attributed to, available keys [Oct4_profile, Oct4_counts, Sox2_profile, Sox2_counts, Nanog_profile, Nanog_counts, Klf4_profile, Klf4_counts]",
-    )
-    parser.add_argument(
         "--cavs-dir",
         type=str,
         default=None,
@@ -168,9 +164,12 @@ def main():
 
     # attribution each test sample
     # NOTE: there should be only one attribution tensor coming out of layer attribution
-    attributions = []
-    attributions_x_avs = []
-    attributions_remainder = []
+    attributions_seq = []
+    attributions_chrom = []
+    attributions_x_avs_seq = []
+    attributions_remainder_seq = []
+    attributions_x_avs_chrom = []
+    attributions_remainder_chrom = []
     regions_save = []
     for (region, seq, chrom, _, _), (bseq, bchrom, _, _) in tqdm(
         zip(target_dl, baseline_dl)
@@ -181,20 +180,23 @@ def main():
 
         # match repeated input shape
         seq = torch.repeat_interleave(seq, repeats=args.num_baselines_per_sample, dim=0)
+        chrom = torch.repeat_interleave(chrom, repeats=args.num_baselines_per_sample, dim=0)
         bseq = bseq[: seq.shape[0]]
-        inputs = utils.seq_transform_fn(seq.to(device))
-        binputs = utils.seq_transform_fn(bseq.to(device))
+        bchrom = bchrom[: chrom.shape[0]]
 
-        neutral_biases = {k: v for k, v in inputs.items() if k != "seq"}
+        seq = utils.seq_transform_fn(seq.to(device))
+        bseq = utils.seq_transform_fn(bseq.to(device))
 
+        chrom = utils.chrom_transform_fn(chrom.to(device))
+        bchrom = utils.chrom_transform_fn(bchrom.to(device))
+        
+        inputs = seq if chrom is None else (seq, chrom)
+        binputs = bseq if chrom is None else (bseq, bchrom)
         # attribution on full sequence
         attribution = deeplift.attribute(
-            inputs["seq"],
-            baselines=binputs["seq"],
+            inputs,
+            baselines=binputs,
             additional_forward_args=(
-                neutral_biases,
-                args.output_key,
-                True,
                 cavs_list,
                 False,
                 False,
@@ -203,68 +205,46 @@ def main():
             #    None if args.no_multiply_by_inputs else abs_attribution_func
             # ),
         )  # [# batch, dim_projected+dim_residual]
-        attributions.append(
-            attribution.reshape(
-                -1, args.num_baselines_per_sample, *attribution.shape[1:]
-            )
-            .mean(axis=1)
-            .detach()
-            .cpu()
-        )
+
+        def reduce_attrs(attrs):
+            return attrs.reshape(-1, args.num_baselines_per_sample, *attrs.shape[1:]).mean(axis=1).detach().cpu()
+
+        if chrom is None:
+            attributions_seq.append(reduce_attrs(attribution))
+        else:
+            attributions_seq.append(reduce_attrs(attribution[0]))
+            attributions_chrom.append(reduce_attrs(attribution[1]))
 
         if cavs_list is not None:
             # attribution on x avs directions
             attribution_x_avs = deeplift.attribute(
-                inputs["seq"],
-                baselines=binputs["seq"],
+                inputs,
+                baselines=binputs,
                 additional_forward_args=(
-                    neutral_biases,
-                    args.output_key,
-                    True,
                     cavs_list,
                     False,
                     True,
                 ),
-                # custom_attribution_func=(
-                #    None if args.no_multiply_by_inputs else abs_attribution_func
-                # ),
             )  # [# batch, dim_projected+dim_residual]
             # attribution on remainder
             attribution_remainder = deeplift.attribute(
-                inputs["seq"],
-                baselines=binputs["seq"],
+                inputs,
+                baselines=binputs,
                 additional_forward_args=(
-                    neutral_biases,
-                    args.output_key,
-                    True,
                     cavs_list,
                     True,
                     False,
                 ),
-                # custom_attribution_func=(
-                #    None if args.no_multiply_by_inputs else abs_attribution_func
-                # ),
             )  # [# batch, dim_projected+dim_residual]
-            attributions_x_avs.append(
-                attribution_x_avs.reshape(
-                    -1, args.num_baselines_per_sample, *attribution_x_avs.shape[1:]
-                )
-                .mean(axis=1)
-                .detach()
-                .cpu()
-            )
-            attributions_remainder.append(
-                attribution_remainder.reshape(
-                    -1, args.num_baselines_per_sample, *attribution_remainder.shape[1:]
-                )
-                .mean(axis=1)
-                .detach()
-                .cpu()
-            )
 
-        # make predictions
-        # target_preds[output_key].append(tpcav_model(inpt_projected.to(device), avs_residual.to(device), args.output_key).detach().cpu())
-        # baseline_preds[output_key].append(tpcav_model(bavs_projected.to(device), bavs_residual.to(device), args.output_key).detach().cpu())
+            if chrom is None:
+                attributions_x_avs_seq.append(reduce_attrs(attribution_x_avs))
+                attributions_remainder_seq.append(reduce_attrs(attribution_remainder))
+            else:
+                attributions_x_avs_seq.append(reduce_attrs(attribution_x_avs[0]))
+                attributions_x_avs_chrom.append(reduce_attrs(attribution_x_avs[1]))
+                attributions_remainder_seq.append(reduce_attrs(attribution_remainder[0]))
+                attributions_remainder_chrom.append(reduce_attrs(attribution_remainder[1]))
 
         with torch.no_grad():
             del (
@@ -274,6 +254,9 @@ def main():
             )
             torch.cuda.empty_cache()
 
+    # save regions
+    np.savetxt(f"{args.output_prefix}.regions.txt", regions_save, fmt="%s")
+
     # save attributions
     def save_attrs(attrs, name):
         attrs = torch.cat(attrs)
@@ -282,72 +265,50 @@ def main():
         return attrs
 
     # sum over the last dimension to get per base pair attributions
-    attrs_all = save_attrs(attributions, "attributions").sum(dim=2)
-    # save regions
-    np.savetxt(f"{args.output_prefix}.regions.txt", regions_save, fmt="%s")
+    attrs_all_seq = save_attrs(attributions_seq, "attributions_seq").sum(dim=2)
+    if chrom is not None:
+        attrs_all_chrom = save_attrs(attributions_chrom, "attributions_chrom").sum(dim=2)
 
     if cavs_list is not None:
-        attrs_x_avs = save_attrs(attributions_x_avs, "attributions_x_avs").sum(dim=2)
-        attrs_remainder = save_attrs(
-            attributions_remainder, "attributions_remainder"
+        attrs_x_avs_seq = save_attrs(attributions_x_avs_seq, "attributions_x_avs_seq").sum(dim=2)
+        attrs_remainder_seq = save_attrs(
+            attributions_remainder_seq, "attributions_remainder_seq"
         ).sum(dim=2)
-
-        # print summary statistics
-        def compute_attr_contrib(sign="+"):
-            idx = attrs_all < 0 if sign == "-" else attrs_all > 0
-            attrs_all_signed = attrs_all[idx]
-            attrs_x_avs_signed = attrs_x_avs[idx]
-            attrs_x_avs_signed[
-                (attrs_x_avs_signed > 0) if sign == "-" else (attrs_x_avs_signed < 0)
-            ] = 0  # set impatible signed attrs as 0
-            attrs_x_avs_contrib = (
-                attrs_x_avs_signed / attrs_all_signed
-            )  # get element-wise contribution ratio
-            attrs_x_avs_contrib[attrs_x_avs_contrib > 1] = (
-                1  # ceiling the max ratio as 1
-            )
-            print(
-                f"{sign} contribution ratio of x avs attributions to all attributions: {attrs_x_avs_contrib.mean():.3f}"
-            )
-            return attrs_x_avs_contrib, idx
-
-        pos_contrib_ratio, pos_contrib_index = compute_attr_contrib(sign="+")
-        neg_contrib_ratio, neg_contrib_indx = compute_attr_contrib(sign="-")
-
-        with open(f"{args.output_prefix}.contrib_ratio.txt", "w") as f:
-            f.write(
-                f"Positive contribution ratio of x avs attributions to all attributions: {pos_contrib_ratio.mean().item():.3f}\n"
-            )
-            f.write(
-                f"Negative contribution ratio of x avs attributions to all attributions: {neg_contrib_ratio.mean().item():.3f}\n"
-            )
-            f.write(
-                f"Total contribution ratio of x avs attributions to all attributions: {torch.cat([pos_contrib_ratio, neg_contrib_ratio]).mean().item():.3f}\n"
-            )
-        # save regions with the attrib ratios
-        contrib_ratio = torch.zeros_like(attrs_all)
-        assert len(contrib_ratio.shape) == 2
-        contrib_ratio[pos_contrib_index] = pos_contrib_ratio
-        contrib_ratio[neg_contrib_indx] = neg_contrib_ratio
-        contrib_ratio_per_region = contrib_ratio.mean(dim=1)
-
-        with open(f"{args.output_prefix}.regions_with_contrib.txt", "w") as o:
-            for r, cr in zip(regions_save, contrib_ratio_per_region):
-                o.write(f"{r}\t{cr.item()}\n")
+        if chrom is not None:
+            attrs_x_avs_chrom = save_attrs(attributions_x_avs_chrom, "attributions_x_avs_chrom").sum(dim=2)
+            attrs_remainder_chrom = save_attrs(
+                attributions_remainder_chrom, "attributions_remainder_chrom"
+            ).sum(dim=2)
 
         # save attr x avs and total attrs per region
-        pd.DataFrame(
-            {
-                "region": regions_save,
-                "attrs_total": attrs_all.sum(dim=1).numpy(),
-                "attrs_x_avs": attrs_x_avs.sum(dim=1).numpy(),
-            }
-        ).sort_values("attrs_x_avs", ascending=False).to_csv(
-            f"{args.output_prefix}.regions_with_attrs_x_avs.txt",
-            index=False,
-            header=True,
-            sep="\t",
-        )
+        if chrom is not None:
+            pd.DataFrame(
+                {
+                    "region": regions_save,
+                    "attrs_total_seq": attrs_all_seq.sum(dim=1).numpy(),
+                    "attrs_x_avs_seq": attrs_x_avs_seq.sum(dim=1).numpy(),
+                    "attrs_total_chrom": attrs_all_chrom.sum(dim=1).numpy(),
+                    "attrs_x_avs_chrom": attrs_x_avs_chrom.sum(dim=1).numpy(),
+                }
+                ).assign(attrs_x_avs_total=lambda x: x['attrs_x_avs_seq'] + x['attrs_x_avs_chrom']).sort_values("attrs_x_avs_total", ascending=False).to_csv(
+                f"{args.output_prefix}.regions_with_attrs_x_avs.txt",
+                index=False,
+                header=True,
+                sep="\t",
+            )
+        else:
+            pd.DataFrame(
+                {
+                    "region": regions_save,
+                    "attrs_total_seq": attrs_all_seq.sum(dim=1).numpy(),
+                    "attrs_x_avs_seq": attrs_x_avs_seq.sum(dim=1).numpy(),
+                }
+                ).sort_values("attrs_x_avs_seq", ascending=False).to_csv(
+                f"{args.output_prefix}.regions_with_attrs_x_avs.txt",
+                index=False,
+                header=True,
+                sep="\t",
+            )
 
 
 if __name__ == "__main__":
