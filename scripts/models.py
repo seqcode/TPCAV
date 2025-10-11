@@ -62,7 +62,7 @@ class Model_Class(torch.nn.Module):
     ):
         if cavs_list is not None:
             y_hat_x_avs, y_hat_remainder = self.disentangle_avs_x_cavs(
-                y_projected, y_residual, cavs_list
+                y_projected, y_residual, cavs_list, mute_x_avs, mute_remainder
             )
 
             if mute_x_avs:  # which part of the activations to use
@@ -98,3 +98,45 @@ class Model_Class(torch.nn.Module):
             return y_residual, y_projected
         else:
             return y, None
+
+    def disentangle_avs_x_cavs(
+        self, y_projected, y_residual, cavs_list, mute_x_avs=False, mute_remainder=False
+    ):
+        "Given a list of CAVs, disentangle the activations"
+        y_all = torch.cat(
+            [y_projected, y_residual], dim=1
+        )  # merge projected and residual activations because cavs is computed on projected + residual
+
+        cavs_matrix = torch.stack(cavs_list, dim=1).to(y_all.device)  # [#dims, #cavs]
+
+        if cavs_matrix.shape[1] > cavs_matrix.shape[0]:
+            print(
+                f"Warning: CAVs matrix has more CAVs than dimensions! Remainder should be super close to 0"
+            )
+
+        # check the rank of cavs_matrix first
+        mrank = torch.linalg.matrix_rank(cavs_matrix)
+
+        cavs_ortho_matrix = (
+            torch.linalg.qr(cavs_matrix, mode="reduced").Q[:, :mrank].detach()
+        )  # [#dims, #cavs], then keep the first mrank orthogonal basis as the remaining ones should be close to 0 and meaningless
+        assert torch.allclose(
+            cavs_ortho_matrix.T @ cavs_ortho_matrix,
+            torch.eye(mrank).to(cavs_ortho_matrix.device),
+            atol=1e-3,
+            rtol=1e-3,
+        ), f"Q^TQ is not identity matrix! Please check the CAVs matrix. {cavs_ortho_matrix.T @ cavs_ortho_matrix}"
+        y_x_avs = y_all @ cavs_ortho_matrix @ cavs_ortho_matrix.T
+        y_remainder = y_all - y_x_avs  # [# batches, # dims]
+
+        dim_projected = y_projected.shape[1] if y_projected is not None else 0
+
+        if mute_x_avs:
+            y_x_avs.register_hook(lambda grad: torch.zeros_like(grad))
+        if mute_remainder:
+            y_remainder.register_hook(lambda grad: torch.zeros_like(grad))
+
+        return (
+            y_x_avs[:, :dim_projected] + y_remainder[:, :dim_projected],
+            y_x_avs[:, dim_projected:] + y_remainder[:, dim_projected:],
+        )
