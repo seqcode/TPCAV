@@ -61,26 +61,20 @@ class Model_Class(torch.nn.Module):
         mute_remainder=False,
     ):
         if cavs_list is not None:
-            y_hat_x_avs, y_hat_remainder = self.disentangle_avs_x_cavs(
+            y_projected, y_residual = self.disentangle_avs_x_cavs(
                 y_projected, y_residual, cavs_list, mute_x_avs, mute_remainder
             )
-
-            if mute_x_avs:  # which part of the activations to use
-                y_hat_x_avs.register_hook(lambda grad: torch.zeros_like(grad))
-            if mute_remainder:
-                y_hat_remainder.register_hook(lambda grad: torch.zeros_like(grad))
-            y_hat = y_hat_x_avs + y_hat_remainder + self.zscore_mean
-        else:
-            y_hat = (
-                self.merge_projected_and_residual(y_projected, y_residual)
-                + self.zscore_mean
-            )
+        y_hat = (
+            self.merge_projected_and_residual(y_projected, y_residual)
+            + self.zscore_mean
+        )
 
         if self.orig_shape is not None:
             y_hat = y_hat.reshape((-1, *self.orig_shape[1:]))
 
         # resume back to normal forward process
         y_hat = self.resume_forward_from_select_layer(y_hat)
+
         return y_hat
 
     def project_avs_to_pca(self, y):
