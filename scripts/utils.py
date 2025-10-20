@@ -6,6 +6,7 @@ Utility functions of loading model, dataset, etc.
 
 from itertools import cycle
 
+import Bio
 import numpy as np
 import pandas as pd
 import pyfaidx
@@ -13,7 +14,6 @@ import seqchromloader as scl
 import torch
 from Bio import SeqIO
 from deeplift.dinuc_shuffle import dinuc_shuffle
-from models import ConvTowerDomain_v6
 from pybedtools import BedTool
 from pyfaidx import Fasta
 from seq_utils import insert_motif_into_seq, insert_region_into_seq
@@ -289,7 +289,10 @@ def center_windows(df, window_len=1024):
     df = df.assign(mid=lambda x: ((x["start"] + x["end"]) / 2).astype(int)).assign(
         start=lambda x: x["mid"] - halfR, end=lambda x: x["mid"] + halfR
     )
-    return df[["chrom", "start", "end"]]
+    if "strand" in df.columns:
+        return df[["chrom", "start", "end", "strand"]]
+    else:
+        return df[["chrom", "start", "end"]]
 
 
 def collate_seq(batch):
@@ -363,7 +366,8 @@ def seq_dataloader_from_dataframe(
 ):
     seq_df = center_windows(seq_df, window_len=window_len)
     seq_df["label"] = -1
-    seq_df["strand"] = "+"
+    if not "strand" in seq_df.columns:
+        seq_df["strand"] = "+"
     # print(f"Filtering out concept samples that don't exist in the genome...")
     seq_df = scl.filter_chromosomes(seq_df, to_keep=Fasta(genome_fasta).keys())
     dl = scl.SeqChromDatasetByDataFrame(
@@ -421,7 +425,8 @@ def chrom_dataloader_from_dataframe(
 ):
     chrom_df = center_windows(chrom_df, window_len=input_window_length)
     chrom_df["label"] = -1
-    chrom_df["strand"] = "+"
+    if not "strand" in chrom_df.columns:
+        chrom_df["strand"] = "+"
     # print(f"Filtering out concept samples that don't exist in the genome...")
     chrom_df = scl.filter_chromosomes(chrom_df, to_keep=Fasta(genome_fasta).keys())
     dl = scl.SeqChromDatasetByDataFrame(
@@ -475,7 +480,8 @@ class SeqChromConcept:
             )
             seq_df = center_windows(seq_df, window_len=self.window_len)
             seq_df["label"] = -1
-            seq_df["strand"] = "+"
+            if not "strand" in seq_df.columns:
+                seq_df["strand"] = "+"
             # print(f"Filtering out concept samples that don't exist in the genome...")
             seq_df = scl.filter_chromosomes(
                 seq_df, to_keep=Fasta(self.genome_fasta).keys()
@@ -515,7 +521,8 @@ class SeqChromConcept:
         )
         chrom_df = center_windows(chrom_df, window_len=self.window_len)
         chrom_df["label"] = -1
-        chrom_df["strand"] = "+"
+        if not "strand" in chrom_df.columns:
+            chrom_df["strand"] = "+"
         # print(f"Filtering out concept samples that don't exist in the genome...")
         chrom_df = scl.filter_chromosomes(
             chrom_df, to_keep=Fasta(self.genome_fasta).keys()
@@ -610,4 +617,5 @@ class CustomMotif:
 
     def reverse_complement(self):
         self.consensus = Bio.Seq.reverse_complement(self.consensus)
+        self.name = self.name + "_rc"
         return self

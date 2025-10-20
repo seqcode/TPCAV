@@ -182,9 +182,9 @@ def train_classifier(avs, args, output_dir, sgd_penalty="l2"):
 def construct_motif_concept_dataloader_from_control(
     control_seq_bed_df,
     genome_fasta,
-    motifs:list,
+    motifs: list,
     num_motifs=128,
-    motif_mode='pwm',
+    motif_mode="pwm",
     start_buffer=0,
     end_buffer=0,
     batch_size=8,
@@ -344,6 +344,11 @@ def main():
         "--num-motifs", type=int, default=12, help="Number of motifs to insert"
     )
     parser.add_argument(
+        "--include-reverse-complement",
+        action="store_true",
+        help="Use both forward and reverse complement version of motifs",
+    )
+    parser.add_argument(
         "--num-samples-per-concept",
         type=int,
         default=10,
@@ -422,21 +427,29 @@ def main():
     concepts = []
     ## custom motifs, use the first control concept as a template
     if args.custom_motifs is not None:
-        df = pd.read_table(args.custom_motifs, names=['motif_name', 'consensus_seq'])
+        df = pd.read_table(args.custom_motifs, names=["motif_name", "consensus_seq"])
         for m in np.unique(df.motif_name):
             motif_name = m
-            consensus_seqs = df.loc[df.motif_name==m, 'consensus_seq'].tolist() # take all consensus seqs that correspond to the same motif name
+            consensus_seqs = df.loc[
+                df.motif_name == m, "consensus_seq"
+            ].tolist()  # take all consensus seqs that correspond to the same motif name
             motifs = []
             for i, c in enumerate(consensus_seqs):
                 motif = utils.CustomMotif(f"{m}_{i}", c)
                 motifs.append(motif)
+                if (
+                    args.include_reverse_complement
+                ):  # add reverse complement if specified
+                    motif_rc = motif.reverse_complement()
+                    motifs.append(motif_rc)
+
             cn = f"{motif_name}"
             seq_dl = construct_motif_concept_dataloader_from_control(
                 random_regions_df,
                 args.genome_fasta_file,
                 motifs=motifs,
                 num_motifs=args.num_motifs,
-                motif_mode='consensus',
+                motif_mode="consensus",
                 batch_size=BATCH_SIZE,
                 infinite=False,
             )
@@ -451,13 +464,18 @@ def main():
     if args.meme_motifs is not None:
         with open(args.meme_motifs) as f:
             for motif in Bio_motifs.parse(f, fmt="MINIMAL"):
+                motifs = []
+                motifs.append(motif)
+                if args.include_reverse_complement:
+                    motif_rc = motif.reverse_complement()
+                    motifs.append(motif_rc)
                 cn = f"{motif.name.replace('/', '-')}"
                 seq_dl = construct_motif_concept_dataloader_from_control(
                     random_regions_df,
                     args.genome_fasta_file,
-                    motifs=[motif],
+                    motifs=motifs,
                     num_motifs=args.num_motifs,
-                    motif_mode='pwm',
+                    motif_mode="pwm",
                     batch_size=BATCH_SIZE,
                     infinite=False,
                 )
@@ -528,7 +546,7 @@ def main():
     logger.info(concepts)
 
     # register hook
-    def get_activation(concept, num_samples=10):
+    def get_activation(concept, num_samples=args.num_samples_per_concept):
         avs = []
         num = 0
         for seq, chrom in concept.data_iter:
@@ -596,8 +614,9 @@ def main():
     # set to eval mode for sanity
     model.eval()
 
-    def get_tpcav_activations(concept):
+    def get_tpcav_activations(concept, num_samples=args.num_samples):
         avs_pca = []
+        num = 0
         for seq, chrom in concept.data_iter:
             seq = utils.seq_transform_fn(seq)
             chrom = utils.chrom_transform_fn(chrom)
@@ -613,9 +632,13 @@ def main():
             else:
                 av_pca = av_residual
             avs_pca.append(av_pca.detach().cpu())
+
+            num += av_pca.shape[0]
+            if num >= num_samples:
+                break
             with torch.no_grad():
                 del seq, av, av_projected, av_residual
-        return torch.cat(avs_pca).detach().cpu()
+        return torch.cat(avs_pca).detach().cpu()[:num_samples]
 
     # get activations of each concept and train classifier for each pair
     pool = Pool()
