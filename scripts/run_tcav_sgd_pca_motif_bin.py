@@ -15,10 +15,11 @@ from multiprocessing import Pool
 from os import makedirs, path
 
 import numpy as np
+import pandas as pd
 import seqchromloader as scl
 import torch
 import utils
-from Bio import motifs
+from Bio import motifs as Bio_motifs
 from captum.concept import Concept
 from run_tcav_sgd_pca import (
     construct_motif_concept_dataloader_from_control,
@@ -82,6 +83,11 @@ def main():
         default=3,
         type=int,
         help="Number of motifs to insert per bin",
+    )
+    parser.add_argument(
+        "--include-reverse-complement",
+        action="store_true",
+        help="Use both forward and reverse complement version of motifs",
     )
     parser.add_argument(
         "--bin-edges",
@@ -165,38 +171,58 @@ def main():
     ## custom motifs, use the first control concept as a template
     ### according to # bins, get the list of buffer
     breakpoints = [0, *args.bin_edges, args.input_window_length]
-    bin_list = [(breakpoints[i], breakpoints[i+1]) for i in range(len(breakpoints)-1)]
+    bin_list = [
+        (breakpoints[i], breakpoints[i + 1]) for i in range(len(breakpoints) - 1)
+    ]
 
     if args.custom_motifs is not None:
-        with open(args.custom_motifs) as f:
+        df = pd.read_table(args.custom_motifs, names=["motif_name", "consensus_seq"])
+        for m in np.unique(df.motif_name):
+            motif_name = m
+            consensus_seqs = df.loc[
+                df.motif_name == m, "consensus_seq"
+            ].tolist()  # take all consensus seqs that correspond to the same motif name
+            motifs = []
+            for i, c in enumerate(consensus_seqs):
+                motif = utils.CustomMotif(f"{m}_{i}", c)
+                motifs.append(motif)
+                if (
+                    args.include_reverse_complement
+                ):  # add reverse complement if specified
+                    motif_rc = motif.reverse_complement()
+                    motifs.append(motif_rc)
 
-            for m in f:
-                for buffer_idx, (bin_start, bin_end) in enumerate(bin_list):
-                    start_buffer = bin_start
-                    end_buffer = args.input_window_length - bin_end
-                    motif_name, consensus_seq = m.strip().split("\t")
-                    motif = utils.CustomMotif("motif", consensus_seq)
-                    cn = f"{motif_name}_bin_start_{bin_start}_end_{bin_end}"
-                    seq_dl = construct_motif_concept_dataloader_from_control(
-                        random_regions_df,
-                        args.genome_fasta_file,
-                        motif=motif,
-                        num_motifs=args.num_motifs,
-                        start_buffer=start_buffer,
-                        end_buffer=end_buffer,
-                        batch_size=BATCH_SIZE,
+            for buffer_idx, (bin_start, bin_end) in enumerate(bin_list):
+                start_buffer = bin_start
+                end_buffer = args.input_window_length - bin_end
+                cn = f"{motif_name}_bin_start_{bin_start}_end_{bin_end}"
+                seq_dl = construct_motif_concept_dataloader_from_control(
+                    random_regions_df,
+                    args.genome_fasta_file,
+                    motifs=motifs,
+                    num_motifs=args.num_motifs,
+                    start_buffer=start_buffer,
+                    end_buffer=end_buffer,
+                    batch_size=BATCH_SIZE,
+                )
+                concepts.append(
+                    Concept(
+                        id=idx,
+                        name=cn,
+                        data_iter=zip(seq_dl, control_chrom_dl),
                     )
-                    concepts.append(
-                        Concept(
-                            id=idx,
-                            name=cn,
-                            data_iter=zip(seq_dl, control_chrom_dl),
-                        )
-                    )
-                    idx += 1
+                )
+                idx += 1
+
     if args.meme_motifs is not None:
         with open(args.meme_motifs) as f:
-            for motif in motifs.parse(f, fmt="MINIMAL"):
+            for motif in Bio_motifs.parse(f, fmt="MINIMAL"):
+                motifs = []
+                motifs.append(motif)
+                if args.include_reverse_complement:
+                    motif_rc = motif.reverse_complement()
+                    motifs.append(motif_rc)
+
                 for buffer_idx, (bin_start, bin_end) in enumerate(bin_list):
                     start_buffer = bin_start
                     end_buffer = args.input_window_length - bin_end
@@ -204,7 +230,7 @@ def main():
                     seq_dl = construct_motif_concept_dataloader_from_control(
                         random_regions_df,
                         args.genome_fasta_file,
-                        motif=motif,
+                        motifs=motifs,
                         num_motifs=args.num_motifs,
                         start_buffer=start_buffer,
                         end_buffer=end_buffer,
