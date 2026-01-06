@@ -1,6 +1,11 @@
-data/hg19.fa
-data/checkpoint*
-**/__pycache__/
-**/.ipynb_checkpoints/
-cavs_test/
-output/
+*
+!data/motif-clustering-v2.1beta_consensus_pwms.meme
+!tpcav/
+!tpcav/*.py
+!scripts/
+!scripts/*.py
+!test/
+!test/*.py
+!pyproject.toml
+!LICENSE
+!README.md

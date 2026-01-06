@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tpcav"
+version = "0.1.0"
+description = "Testing with PCA projected Concept Activation Vectors"
+authors = [{name = "Jianyu Yang", email = "yztxwd@gmail.com"},]
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "torch",
+    "pandas",
+    "numpy",
+    "seqchromloader",
+    "deeplift",
+    "pyfaidx",
+    "pybedtools",
+    "captum",
+    "scikit-learn",
+    "biopython",
+    "seaborn",
+    "matplotlib",
+]
+license = "MIT AND (Apache-2.0 OR BSD-2-Clause)"
+keywords = ["interpretation",  "attribution", "concept", "genomics", "deep learning"]
+
+[project.urls]
+Homepage = "https://github.com/seqcode/TPCAV"
+
+[tool.setuptools.packages.find]
+exclude = ["data", "model", "node_modules", "test", "scripts"]
