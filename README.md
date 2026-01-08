@@ -1,14 +1,10 @@
 # TPCAV (Testing with PCA projected Concept Activation Vectors)
 
-Analysis pipeline for TPCAV
+This repository contains code to compute TPCAV (Testing with PCA projected Concept Activation Vectors) on deep learning models. TPCAV is an extension of the original TCAV method, which uses PCA to reduce the dimensionality of the activations at a selected intermediate layer before computing Concept Activation Vectors (CAVs)
 
-## Dependencies
+## Installation
 
-You can use your own environment for the model, in addition, you need to install the following packages:
 
-- captum 0.7
-- seqchromloader 0.8.5
-- scikit-learn 1.5.2
 
 ## Workflow
 

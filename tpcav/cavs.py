@@ -246,6 +246,16 @@ class CavTrainer:
 
         return scores
 
+    def tpcav_score_all_concepts(self, attributions: torch.Tensor) -> dict:
+        """
+        Compute TCAV scores for all trained concepts.
+        """
+        scores_dict = {}
+        for concept_name in self.cav_weights.keys():
+            scores = self.tpcav_score(concept_name, attributions)
+            scores_dict[concept_name] = scores
+        return scores_dict
+
     def tpcav_score_binary_log_ratio(
         self, concept_name: str, attributions: torch.Tensor, pseudocount: float = 1.0
     ) -> float:
@@ -258,6 +268,20 @@ class CavTrainer:
         neg_count = (scores < 0).sum().item()
 
         return np.log((pos_count + pseudocount) / (neg_count + pseudocount))
+
+    def tpcav_score_all_concepts_log_ratio(
+        self, attributions: torch.Tensor, pseudocount: float = 1.0
+    ) -> dict:
+        """
+        Compute TCAV log ratio scores for all trained concepts.
+        """
+        log_ratio_dict = {}
+        for concept_name in self.cav_weights.keys():
+            log_ratio = self.tpcav_score_binary_log_ratio(
+                concept_name, attributions, pseudocount
+            )
+            log_ratio_dict[concept_name] = log_ratio
+        return log_ratio_dict
 
     def plot_cavs_similaritiy_heatmap(
         self,

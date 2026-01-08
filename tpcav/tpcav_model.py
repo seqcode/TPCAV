@@ -11,10 +11,6 @@ logger = logging.getLogger(__name__)
 
 def _abs_attribution_func(multipliers, inputs, baselines):
     "Multiplier x abs(inputs - baselines) to avoid double-sign effects."
-    # print(f"inputs: {inputs[1][:5]}")
-    # print(f"baselines: {baselines[1][:5]}")
-    # print(f"multipliers: {multipliers[0][:5]}")
-    # print(f"multipliers: {multipliers[1][:5]}")
     return tuple(
         (input_ - baseline).abs() * multiplier
         for input_, baseline, multiplier in zip(inputs, baselines, multipliers)
@@ -174,8 +170,12 @@ class TPCAV(torch.nn.Module):
         target_batches: Iterable,
         baseline_batches: Iterable,
         multiply_by_inputs: bool = True,
+        abs_inputs_diff: bool = True,
     ) -> Dict[str, torch.Tensor]:
-        """Compute DeepLift attributions on PCA embedding space.
+        """
+        Compute DeepLift attributions on PCA embedding space.
+
+        By default, it computes (input - baseline).abs() * multiplier to avoid double-sign effects (abs_inputs_diff=True).
 
         target_batches and baseline_batches should yield (seq, chrom) pairs of matching length.
         """
@@ -183,6 +183,8 @@ class TPCAV(torch.nn.Module):
             raise RuntimeError("Call fit_pca before attributing.")
         self.forward = self.forward_from_embeddings_at_layer
         deeplift = DeepLift(self, multiply_by_inputs=multiply_by_inputs)
+
+        custom_attr_func = _abs_attribution_func if abs_inputs_diff else None
 
         attributions = []
         for inputs, binputs in zip(target_batches, baseline_batches):
@@ -205,7 +207,7 @@ class TPCAV(torch.nn.Module):
                     ),
                     additional_forward_args=(inputs,),
                     custom_attribution_func=(
-                        None if not multiply_by_inputs else _abs_attribution_func
+                        None if not multiply_by_inputs else custom_attr_func
                     ),
                 )
                 attr_residual, attr_projected = attribution
@@ -219,7 +221,7 @@ class TPCAV(torch.nn.Module):
                         inputs,
                     ),
                     custom_attribution_func=(
-                        None if not multiply_by_inputs else _abs_attribution_func
+                        None if not multiply_by_inputs else custom_attr_func
                     ),
                 )[0]
 
