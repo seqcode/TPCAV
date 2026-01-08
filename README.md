@@ -4,57 +4,96 @@ This repository contains code to compute TPCAV (Testing with PCA projected Conce
 
 ## Installation
 
+`pip install tpcav`
 
+## Usage
 
-## Workflow
+Example usage on explaining a dummpy model using motif concepts
 
-1. Since not every saved pytorch model stores the computation graph, you need to manually add functions to let the script know how to get the activations of the intermediate layer and how to proceed from there.
+```python
 
-    There are 3 places you need to insert your own code.
+from tpcav import helper
+from tpcav.cavs import CavTrainer
+from tpcav.concepts import ConceptBuilder
+from tpcav.tpcav_model import TPCAV, _abs_attribution_func
+
+class DummyModelSeq(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = torch.nn.Linear(1024, 1)
+        self.layer2 = torch.nn.Linear(4, 1)
+
+    def forward(self, seq):
+        y_hat = self.layer1(seq)
+        y_hat = y_hat.squeeze(-1)
+        y_hat = self.layer2(y_hat)
+        return y_hat
+
+if __name__ == "__main__":
+    motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
     
-    - Model class definition in models.py
-        - Please first copy your class definition into `Model_Class` in the script, it already has several pre-defined class functions, you need to fill in the following two functions:
-            - `forward_until_select_layer`: this is the function that takes your model input and forward until the layer you want to compute TPCAV score on
-            - `resume_forward_from_select_layer`: this is the function that starts from the activations of your select layer and forward all the way until the end
-        -  There are also functions necessary for TPCAV computation, don't change them:
-            - `forward_from_start`: this function calls `forward_until_select_layer` and `resume_forward_from_select_layer` to do a full forward pass
-            - `forward_from_projected_and_residual`: this function takes the PCA projected activations and unexplained residual to do the forward pass
-            - `project_avs_to_pca`: this function takes care of the PCA projection
+    # create concept builder to generate concepts
+    builder = ConceptBuilder(
+        genome_fasta="data/hg38.analysisSet.fa",
+        genome_size_file="data/hg38.analysisSet.fa.fai",
+        input_window_length=1024,
+        bws=None,
+        num_motifs=12,
+        include_reverse_complement=True,
+        min_samples=1000,
+        batch_size=8,
+    )
+    # use random regions as control  
+    builder.build_control()
+    # use meme motif PWMs to build motif concepts, one concept per motif
+    builder.add_meme_motif_concepts(str(motif_path))
+    # apply transform to convert fasta sequences to one-hot encoded sequences
+    def transform_fasta_to_one_hot_seq(seq, chrom):
+        return (helper.fasta_to_one_hot_sequences(seq),)
+    builder.apply_transform(transform_fasta_to_one_hot_seq)
     
-        > NOTE: you can modify your final output tensor to specifically explain certain transformation of your output, for example, you can take weighted sum of base pair resolution signal prediction to emphasize high signal region.
+    # create TPCAV model on top of your model
+    tpcav_model = TPCAV(DummyModelSeq(), layer_name="layer1")
+    # fit PCA on sampled all concept activations
+    tpcav_model.fit_pca(
+        concepts=builder.all_concepts(),
+        num_samples_per_concept=10,
+        num_pc="full",
+    )
+    torch.save(tpcav_model, "data/tmp_tpcav_model.pt")
     
-    - Function `load_model` in utils.py
-        - Take care of the model initialization and load saved parameters in `load_model`, return the model instance.
-        > NOTE: you need to use your own model class definition in models.py, as we need the functions defined in step 1.
+    # create trainer for computing CAVs
+    cav_trainer = CavTrainer(tpcav_model, penalty="l2")
+    # set control concept for CAV training
+    cav_trainer.set_control(builder.control_concepts[0], num_samples=100)
+    # train CAVs for all concepts
+    cav_trainer.train_concepts(
+        builder.concepts, 100, output_dir="data/cavs/", num_processes=2
+    )
     
-    - Function `seq_transform_fn` in utils.py
-        - By default the dataloader provides one hot coded DNA array of shape (batch_size, 4, len), coded in the order [A, C, G, T], if your model takes a different kind of input, modify `seq_transform_fn` to transform the input
-
-    - Function `chrom_transform_fn` in utils.py
-        - By default the dataloader provides signal array from bigwig files of shape (batch_size, # bigwigs, len), if your model takes a different kind of chromatin input, modify `chrom_transform_fn` to transform the input, if your model is sequence only, leave it to return None.
-
-
-2. Compute CAVs on your model, example command:
-
-```bash
-srun -n1 -c8 --gres=gpu:1 --mem=128G python scripts/run_tcav_sgd_pca.py \
-  cavs_test 1024 data/hg19.fa data/hg19.fa.fai \
-  --meme-motifs data/motif-clustering-v2.1beta_consensus_pwms.test.meme \
-  --bed-chrom-concepts data/ENCODE_DNase_peaks.bed
+    # create input regions and baseline regions for attribution
+    random_regions_1 = helper.random_regions_dataframe(
+        "data/hg38.analysisSet.fa.fai", 1024, 100, seed=1
+    )
+    random_regions_2 = helper.random_regions_dataframe(
+        "data/hg38.analysisSet.fa.fai", 1024, 100, seed=2
+    )
+    # create iterators to yield one-hot encoded sequences from the region dataframes
+    def pack_data_iters(df):
+        seq_fasta_iter = helper.dataframe_to_fasta_iter(
+            df, "data/hg38.analysisSet.fa", batch_size=8
+        )
+        seq_one_hot_iter = (
+            helper.fasta_to_one_hot_sequences(seq_fasta)
+            for seq_fasta in seq_fasta_iter
+        )
+        return zip(
+            seq_one_hot_iter,
+        )
+    # compute layer attributions
+    attributions = tpcav_model.layer_attributions(
+        pack_data_iters(random_regions_1), pack_data_iters(random_regions_2)
+    )["attributions"]
+    # compute TPCAV scores for all concepts
+    cav_trainer.tpcav_score_all_concepts_log_ratio("AC0001:GATA-PROP:GATA", attributions)
 ```
-
-3. Then compute the layer attributions, example command:
-
-```bash
-srun -n1 -c8 --gres=gpu:1 --mem=128G \
-  python scripts/compute_layer_attrs_only.py cavs_test/tpcav_model.pt \
-  data/ChIPseq.H1-hESC.MAX.conservative.all.shuf1k.narrowPeak \
-  1024 data/hg19.fa data/hg19.fa.fai cavs_test/test 
-```
-
-4. run the jupyer notebook to generate summary of your results
-
-```bash
-papermill -f scripts/compute_tcav_v2_pwm.example.yaml scripts/compute_tcav_v2_pwm.py.ipynb cavs_test/tcav_report.py.ipynb
-```
-
