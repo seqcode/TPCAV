@@ -1,4 +1,3 @@
-import inspect
 import logging
 from functools import partial
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -12,6 +11,10 @@ logger = logging.getLogger(__name__)
 
 def _abs_attribution_func(multipliers, inputs, baselines):
     "Multiplier x abs(inputs - baselines) to avoid double-sign effects."
+    # print(f"inputs: {inputs[1][:5]}")
+    # print(f"baselines: {baselines[1][:5]}")
+    # print(f"multipliers: {multipliers[0][:5]}")
+    # print(f"multipliers: {multipliers[1][:5]}")
     return tuple(
         (input_ - baseline).abs() * multiplier
         for input_, baseline, multiplier in zip(inputs, baselines, multipliers)
@@ -61,7 +64,6 @@ class TPCAV(torch.nn.Module):
         self._set_buffer("pca_inv", tpcav_state_dict["pca_inv"])
         self._set_buffer("orig_shape", tpcav_state_dict["orig_shape"])
         self.fitted = True
-        print(inspect.currentframe().f_back.f_code.co_name)
         logger.warning(
             "Restored TPCAV state, please set model attribute!\n\n Example: self.model = Model_class()",
         )
@@ -190,7 +192,11 @@ class TPCAV(torch.nn.Module):
             bavs = self._layer_output(*[bi.to(self.device) for bi in binputs])
             bavs_residual, bavs_projected = self.project_activations(bavs)
 
+            # detach the projected tensor as it's connnected to the original input graph,
+            # detaching it would keep the gradients on it
             if avs_projected is not None:
+                avs_projected = avs_projected.detach()
+                bavs_projected = bavs_projected.detach()
                 attribution = deeplift.attribute(
                     (avs_residual.to(self.device), avs_projected.to(self.device)),
                     baselines=(
@@ -258,7 +264,6 @@ class TPCAV(torch.nn.Module):
 
         attributions = []
         for inputs, binputs in zip(target_batches, baseline_batches):
-
             attribution = deeplift.attribute(
                 tuple([i.to(self.device) for i in inputs]),
                 baselines=tuple([bi.to(self.device) for bi in binputs]),

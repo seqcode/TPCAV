@@ -1,13 +1,15 @@
 import unittest
+from functools import partial
 from pathlib import Path
 
 import torch
 from Bio import motifs as Bio_motifs
+from captum.attr import DeepLift
 
 from tpcav import helper
 from tpcav.cavs import CavTrainer
 from tpcav.concepts import ConceptBuilder
-from tpcav.tpcav_model import TPCAV
+from tpcav.tpcav_model import TPCAV, _abs_attribution_func
 
 
 class DummyModelSeq(torch.nn.Module):
@@ -18,6 +20,11 @@ class DummyModelSeq(torch.nn.Module):
 
     def forward(self, seq):
         y_hat = self.layer1(seq)
+        y_hat = y_hat.squeeze(-1)
+        y_hat = self.layer2(y_hat)
+        return y_hat
+
+    def foward_from_layer1(self, y_hat):
         y_hat = y_hat.squeeze(-1)
         y_hat = self.layer2(y_hat)
         return y_hat
@@ -173,6 +180,49 @@ class CavTrainerIntegrationTest(unittest.TestCase):
                 cav_trainer.cav_weights["AC0001:GATA-PROP:GATA"],
             ],
         )
+
+        # compute layer attributions using the old way
+        random1_avs = []
+        random2_avs = []
+        for inputs in pack_data_iters(random_regions_1):
+            av = tpcav_model._layer_output(*[i.to(tpcav_model.device) for i in inputs])
+            random1_avs.append(av.detach().cpu())
+        for inputs in pack_data_iters(random_regions_2):
+            av = tpcav_model._layer_output(*[i.to(tpcav_model.device) for i in inputs])
+            random2_avs.append(av.detach().cpu())
+        random1_avs = torch.cat(random1_avs, dim=0)
+        random2_avs = torch.cat(random2_avs, dim=0)
+
+        random1_avs_residual, random1_avs_projected = tpcav_model.project_activations(
+            random1_avs
+        )
+        random2_avs_residual, random2_avs_projected = tpcav_model.project_activations(
+            random2_avs
+        )
+
+        def forward_from_layer_1_embeddings(tm, avs_residual, avs_projected):
+            y_hat = tm.embedding_to_layer_activation(avs_residual, avs_projected)
+            y_hat = tm.model.foward_from_layer1(y_hat)
+            return y_hat
+
+        tpcav_model.forward = partial(forward_from_layer_1_embeddings, tpcav_model)
+
+        dl = DeepLift(tpcav_model)
+        attributions_old = dl.attribute(
+            (
+                random1_avs_residual.to(tpcav_model.device),
+                random1_avs_projected.to(tpcav_model.device),
+            ),
+            baselines=(
+                random2_avs_residual.to(tpcav_model.device),
+                random2_avs_projected.to(tpcav_model.device),
+            ),
+            custom_attribution_func=_abs_attribution_func,
+        )
+        attr_residual, attr_projected = attributions_old
+        attributions_old = torch.cat((attr_projected, attr_residual), dim=1)
+
+        self.assertTrue(torch.allclose(attributions.cpu(), attributions_old.cpu()))
 
 
 if __name__ == "__main__":
