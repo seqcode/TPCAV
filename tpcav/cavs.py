@@ -5,11 +5,13 @@ CAV training and attribution utilities built on TPCAV.
 
 import logging
 import multiprocessing
+from collections import defaultdict
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import torch
 from sklearn.linear_model import SGDClassifier
@@ -18,7 +20,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import GridSearchCV
 from torch.utils.data import DataLoader, TensorDataset, random_split
 
-from tpcav.tpcav_model import TPCAV
+from . import helper
+from .concepts import ConceptBuilder
+from .tpcav_model import TPCAV
 
 logger = logging.getLogger(__name__)
 
@@ -356,3 +360,121 @@ class CavTrainer:
         ax_log.set_title("TCAV log ratio")
 
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
+
+
+def run_tpcav(
+    model,
+    layer_name: str,
+    meme_motif_file: str,
+    genome_fasta: str,
+    num_motif_insertions: List[int] = [4, 8, 16],
+    bed_seq_file: Optional[str] = None,
+    bed_chrom_file: Optional[str] = None,
+    output_dir: str = "tpcav/",
+    num_samples_for_pca=10,
+    num_samples_for_cav=1000,
+    bws=None,
+    input_transform_func=helper.fasta_chrom_to_one_hot_seq,
+):
+    output_path = Path(output_dir)
+    # create concept builder to generate concepts
+    ## motif concepts
+    motif_concept_builders = []
+    num_motif_insertions.sort()
+    for nm in num_motif_insertions:
+        builder = ConceptBuilder(
+            genome_fasta=genome_fasta,
+            input_window_length=1024,
+            bws=bws,
+            num_motifs=nm,
+            include_reverse_complement=True,
+            min_samples=num_samples_for_cav,
+            batch_size=8,
+        )
+        # use random regions as control
+        builder.build_control()
+        # use meme motif PWMs to build motif concepts, one concept per motif
+        builder.add_meme_motif_concepts(str(meme_motif_file))
+
+        # apply transform to convert fasta sequences to one-hot encoded sequences
+        builder.apply_transform(input_transform_func)
+
+        motif_concept_builders.append(builder)
+    ## bed concepts (optional)
+    bed_builder = ConceptBuilder(
+        genome_fasta=genome_fasta,
+        input_window_length=1024,
+        bws=bws,
+        num_motifs=0,
+        include_reverse_complement=True,
+        min_samples=num_samples_for_cav,
+        batch_size=8,
+    )
+    if bed_seq_file is not None or bed_chrom_file is not None:
+        # use random regions as control
+        bed_builder.build_control()
+        if bed_seq_file is not None:
+            # build concepts from fasta sequences in bed file
+            bed_builder.add_bed_sequence_concepts(bed_seq_file)
+        if bed_chrom_file is not None:
+            # build concepts from chromatin tracks in bed file
+            bed_builder.add_bed_chrom_concepts(bed_chrom_file)
+        # apply transform to convert fasta sequences to one-hot encoded sequences
+        bed_builder.apply_transform(input_transform_func)
+
+    # create TPCAV model on top of your model
+    tpcav_model = TPCAV(model, layer_name=layer_name)
+    # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
+    tpcav_model.fit_pca(
+        concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts,
+        num_samples_per_concept=num_samples_for_pca,
+        num_pc="full",
+    )
+    torch.save(tpcav_model, output_path / "tpcav_model.pt")
+
+    # create trainer for computing CAVs
+    motif_cav_trainers = {}
+    for nm, builder in zip(num_motif_insertions, motif_concept_builders):
+        cav_trainer = CavTrainer(tpcav_model, penalty="l2")
+        # set control concept for CAV training
+        cav_trainer.set_control(
+            builder.control_concepts[0], num_samples=num_samples_for_cav
+        )
+        # train CAVs for all concepts
+        cav_trainer.train_concepts(
+            builder.concepts,
+            num_samples_for_cav,
+            output_dir=str(output_path / f"cavs_{nm}_motifs/"),
+            num_processes=4,
+        )
+        motif_cav_trainers[nm] = cav_trainer
+    bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
+    bed_cav_trainer.set_control(
+        bed_builder.control_concepts[0], num_samples=num_samples_for_cav
+    )
+    bed_cav_trainer.train_concepts(
+        bed_builder.concepts,
+        num_samples_for_cav,
+        output_dir=str(output_path / f"cavs_bed_concepts/"),
+        num_processes=4,
+    )
+
+    # iterate over all trained motif cav trainers to compute AUC of f-scores
+    fscore_results = defaultdict(dict)
+    for concept in motif_concept_builders[-1].concepts:
+        cname = concept.name
+        for nm, cav_trainer in motif_cav_trainers.items():
+            fscore = cav_trainer.cavs_fscores[cname]
+            fscore_results[nm][cname] = fscore
+    fscore_df = pd.DataFrame(fscore_results)
+
+    def compute_auc_fscore(row):
+        y = [row[nm] for nm in num_motif_insertions]
+        return np.trapz(y, num_motif_insertions) / (
+            num_motif_insertions[-1] - num_motif_insertions[0]
+        )
+
+    fscore_df["AUC_fscore"] = fscore_df.apply(compute_auc_fscore, axis=1)
+    fscore_df.sort_values("AUC_fscore", ascending=False, inplace=True)
+
+    return fscore_df, motif_cav_trainers, bed_cav_trainer

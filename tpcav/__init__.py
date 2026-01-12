@@ -10,7 +10,7 @@ import logging
 # Set the logging level to INFO
 logging.basicConfig(level=logging.INFO)
 
-from .cavs import CavTrainer
+from .cavs import CavTrainer, run_tpcav
 from .concepts import ConceptBuilder
 from .helper import (
     bed_to_chrom_tracks_iter,

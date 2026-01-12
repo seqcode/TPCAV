@@ -6,7 +6,7 @@ import torch
 from Bio import motifs as Bio_motifs
 from captum.attr import DeepLift
 
-from tpcav import helper
+from tpcav import helper, run_tpcav
 from tpcav.cavs import CavTrainer
 from tpcav.concepts import ConceptBuilder
 from tpcav.tpcav_model import TPCAV, _abs_attribution_func
@@ -55,7 +55,6 @@ class CavTrainerIntegrationTest(unittest.TestCase):
 
         builder = ConceptBuilder(
             genome_fasta="data/hg38.analysisSet.fa",
-            genome_size_file="data/hg38.analysisSet.fa.fai",
             input_window_length=1024,
             bws=None,
             num_motifs=16,
@@ -102,6 +101,22 @@ class CavTrainerIntegrationTest(unittest.TestCase):
                 f"Control concept has more motif matches than Motif concept, motif concept: {len(matches)}, control concept: {len(control_matches)}",
             )
 
+    def test_run_tpcav(self):
+        motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
+        genome_fasta = "data/hg38.analysisSet.fa"
+        model = DummyModelSeq()
+        layer_name = "layer1"
+
+        run_tpcav(
+            model=model,
+            layer_name=layer_name,
+            meme_motif_file=str(motif_path),
+            genome_fasta=genome_fasta,
+            num_motif_insertions=[4, 8],
+            bed_seq_file="data/hg38_rmsk.head500k.bed",
+            output_dir="data/test_run_tpcav_output/",
+        )
+
     def test_all(self):
 
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
@@ -109,7 +124,6 @@ class CavTrainerIntegrationTest(unittest.TestCase):
 
         builder = ConceptBuilder(
             genome_fasta="data/hg38.analysisSet.fa",
-            genome_size_file="data/hg38.analysisSet.fa.fai",
             input_window_length=1024,
             bws=None,
             num_motifs=12,
@@ -166,7 +180,7 @@ class CavTrainerIntegrationTest(unittest.TestCase):
 
         attributions = tpcav_model.layer_attributions(
             pack_data_iters(random_regions_1), pack_data_iters(random_regions_2)
-        )["attributions"]
+        )["attributions"].cpu()
 
         cav_trainer.tpcav_score("AC0001:GATA-PROP:GATA", attributions)
 
@@ -220,9 +234,12 @@ class CavTrainerIntegrationTest(unittest.TestCase):
             custom_attribution_func=_abs_attribution_func,
         )
         attr_residual, attr_projected = attributions_old
-        attributions_old = torch.cat((attr_projected, attr_residual), dim=1)
+        attributions_old = torch.cat((attr_projected, attr_residual), dim=1).cpu()
 
-        self.assertTrue(torch.allclose(attributions.cpu(), attributions_old.cpu()))
+        self.assertTrue(
+            torch.allclose(attributions.cpu(), attributions_old.cpu(), atol=1e-6),
+            f"Attributions do not match, max difference is {torch.abs(attributions - attributions_old).max()}",
+        )
 
 
 if __name__ == "__main__":

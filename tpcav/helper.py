@@ -3,6 +3,8 @@
 Lightweight data loading helpers for sequences and chromatin tracks.
 """
 
+from collections import defaultdict
+from pathlib import Path
 from typing import Iterable, List, Optional
 
 import numpy as np
@@ -19,11 +21,23 @@ def load_bed_and_center(bed_file: str, window: int) -> pd.DataFrame:
     Load a BED file and center the regions to a fixed window size.
     """
     bed_df = pd.read_table(bed_file, usecols=[0, 1, 2], names=["chrom", "start", "end"])
-    bed_df["center"] = ((bed_df["start"] + bed_df["end"]) // 2).astype(int)
-    bed_df["start"] = bed_df["center"] - (window // 2)
-    bed_df["end"] = bed_df["start"] + window
-    bed_df = bed_df[["chrom", "start", "end"]]
-    return bed_df
+    return center_dataframe_regions(bed_df, window)
+
+
+def center_dataframe_regions(df: pd.DataFrame, window: int) -> pd.DataFrame:
+    """
+    Center the regions in a DataFrame to a fixed window size, keep other columns. Put chrom, start, end as the first 3 columns.
+    """
+    df = df.copy()
+    df["center"] = ((df["start"] + df["end"]) // 2).astype(int)
+    df["start"] = df["center"] - (window // 2)
+    df["end"] = df["start"] + window
+    df = df.drop(columns=["center"])
+    cols = ["chrom", "start", "end"] + [
+        col for col in df.columns if col not in ["chrom", "start", "end"]
+    ]
+    df = df[cols]
+    return df
 
 
 def bed_to_fasta_iter(
@@ -46,6 +60,10 @@ def dataframe_to_fasta_iter(
     fasta_seqs = []
     for row in df.itertuples(index=False):
         seq = str(genome[row.chrom][row.start : row.end]).upper()
+        if len(seq) != (row.end - row.start):
+            raise ValueError(
+                f"Extract Fasta sequence length mismatch with region coordinate length {row.chrom}:{row.start}-{row.end}"
+            )
         fasta_seqs.append(seq)
         if len(fasta_seqs) == batch_size:
             yield fasta_seqs
@@ -163,3 +181,7 @@ def dinuc_shuffle_sequences(
         )
         results.append(shuffles)
     return results
+
+
+def fasta_chrom_to_one_hot_seq(seq, chrom):
+    return (fasta_to_one_hot_sequences(seq),)

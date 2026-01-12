@@ -1,9 +1,9 @@
 import logging
-from copy import deepcopy
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+import pyfaidx
 import seqchromloader as scl
 import webdataset as wds
 from Bio import motifs as Bio_motifs
@@ -74,7 +74,6 @@ class ConceptBuilder:
     def __init__(
         self,
         genome_fasta: str,
-        genome_size_file: str,
         input_window_length: int = 1024,
         bws: Optional[List[str]] = None,
         batch_size: int = 8,
@@ -83,9 +82,13 @@ class ConceptBuilder:
         include_reverse_complement: bool = False,
         min_samples: int = 5000,
         rng_seed: int = 1001,
+        concept_name_suffix: str = "",
     ) -> None:
         self.genome_fasta = genome_fasta
-        self.genome_size_file = genome_size_file
+        pyfaidx.Fasta(
+            genome_fasta, build_index=True
+        )  # validate genome fasta file and build index if needed
+        self.genome_size_file = self.genome_fasta + ".fai"
         self.input_window_length = input_window_length
         self.bws = bws or []
         self.batch_size = batch_size
@@ -94,6 +97,7 @@ class ConceptBuilder:
         self.include_reverse_complement = include_reverse_complement
         self.min_samples = min_samples
         self.rng_seed = rng_seed
+        self.concept_name_suffix = concept_name_suffix
 
         self.control_regions: pd.DataFrame | None = None
         self.control_concepts: List[Concept] = []
@@ -116,7 +120,7 @@ class ConceptBuilder:
 
         concept = Concept(
             id=self._reserve_id(is_control=True),
-            name=name,
+            name=name + self.concept_name_suffix,
             data_iter=_PairedLoader(self._control_seq_dl(), self._control_chrom_dl()),
         )
         self.control_concepts = [concept]
@@ -171,7 +175,7 @@ class ConceptBuilder:
             )
             concept = Concept(
                 id=self._reserve_id(),
-                name=motif_name,
+                name=motif_name + self.concept_name_suffix,
                 data_iter=_PairedLoader(seq_dl, self._control_chrom_dl()),
             )
             self.concepts.append(concept)
@@ -206,80 +210,91 @@ class ConceptBuilder:
                 )
                 concept = Concept(
                     id=self._reserve_id(),
-                    name=motif_name,
+                    name=motif_name + self.concept_name_suffix,
                     data_iter=_PairedLoader(seq_dl, self._control_chrom_dl()),
                 )
                 self.concepts.append(concept)
                 added.append(concept)
         return added
 
-    def add_bed_sequence_concepts(self, bed_paths: Iterable[str]) -> List[Concept]:
+    def add_bed_sequence_concepts(self, bed_path: str) -> List[Concept]:
         """Add concepts backed by BED sequences with concept_name in column 5."""
         added: List[Concept] = []
-        for bed in bed_paths:
-            bed_df = pd.read_table(
-                bed,
-                header=None,
-                usecols=[0, 1, 2, 3, 4],
-                names=["chrom", "start", "end", "strand", "concept_name"],
-            )
-            for concept_name in bed_df.concept_name.unique():
-                concept_df = bed_df.loc[bed_df.concept_name == concept_name]
-                if len(concept_df) < self.min_samples:
-                    logger.warning(
-                        "Concept %s has %s samples, fewer than min_samples=%s; skipping",
-                        concept_name,
-                        len(concept_df),
-                        self.min_samples,
-                    )
-                    continue
-                seq_fasta_iter = helper.dataframe_to_fasta_iter(
-                    concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
-                    self.genome_fasta,
-                    batch_size=self.batch_size,
-                )
-                concept = Concept(
-                    id=self._reserve_id(),
-                    name=concept_name,
-                    data_iter=_PairedLoader(seq_fasta_iter, self._control_chrom_dl()),
-                )
-                self.concepts.append(concept)
-                added.append(concept)
+        bed_df = pd.read_table(
+            bed_path,
+            header=None,
+            usecols=[0, 1, 2, 3, 4],
+            names=["chrom", "start", "end", "strand", "concept_name"],
+        )
+        added.extend(self.add_dataframe_sequence_concepts(bed_df))
         return added
 
-    def add_bed_chrom_concepts(self, bed_paths: Iterable[str]) -> List[Concept]:
+    def add_dataframe_sequence_concepts(self, dataframe: pd.DataFrame) -> List[Concept]:
+        """Add concepts backed by BED sequences with concept_name in column 5."""
+        dataframe = helper.center_dataframe_regions(dataframe, self.input_window_length)
+        added: List[Concept] = []
+        for concept_name in dataframe.concept_name.unique():
+            concept_df = dataframe.loc[dataframe.concept_name == concept_name]
+            if len(concept_df) < self.min_samples:
+                logger.warning(
+                    "Concept %s has %s samples, fewer than min_samples=%s; skipping",
+                    concept_name,
+                    len(concept_df),
+                    self.min_samples,
+                )
+                continue
+            seq_fasta_iter = helper.dataframe_to_fasta_iter(
+                concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
+                self.genome_fasta,
+                batch_size=self.batch_size,
+            )
+            concept = Concept(
+                id=self._reserve_id(),
+                name=concept_name + self.concept_name_suffix,
+                data_iter=_PairedLoader(seq_fasta_iter, self._control_chrom_dl()),
+            )
+            self.concepts.append(concept)
+            added.append(concept)
+        return added
+
+    def add_bed_chrom_concepts(self, bed_path: str) -> List[Concept]:
         """Add concepts backed by chromatin signal bigwigs and BED coordinates."""
         added: List[Concept] = []
-        for bed in bed_paths:
-            bed_df = pd.read_table(
-                bed,
-                header=None,
-                usecols=[0, 1, 2, 3, 4],
-                names=["chrom", "start", "end", "strand", "concept_name"],
+        bed_df = pd.read_table(
+            bed_path,
+            header=None,
+            usecols=[0, 1, 2, 3, 4],
+            names=["chrom", "start", "end", "strand", "concept_name"],
+        )
+        added.extend(self.add_dataframe_chrom_concepts(bed_df))
+        return added
+
+    def add_dataframe_chrom_concepts(self, dataframe) -> List[Concept]:
+        """Add concepts backed by chromatin signal bigwigs and BED coordinates."""
+        dataframe = helper.center_dataframe_regions(dataframe, self.input_window_length)
+        added: List[Concept] = []
+        for concept_name in dataframe.concept_name.unique():
+            concept_df = dataframe.loc[dataframe.concept_name == concept_name]
+            if len(concept_df) < self.min_samples:
+                logger.warning(
+                    "Concept %s has %s samples, fewer than min_samples=%s; skipping",
+                    concept_name,
+                    len(concept_df),
+                    self.min_samples,
+                )
+                continue
+            chrom_dl = helper.dataframe_to_chrom_tracks_iter(
+                concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
+                self.bws,
+                batch_size=self.batch_size,
             )
-            for concept_name in bed_df.concept_name.unique():
-                concept_df = bed_df.loc[bed_df.concept_name == concept_name]
-                if len(concept_df) < self.min_samples:
-                    logger.warning(
-                        "Concept %s has %s samples, fewer than min_samples=%s; skipping",
-                        concept_name,
-                        len(concept_df),
-                        self.min_samples,
-                    )
-                    continue
-                chrom_dl = helper.dataframe_to_chrom_tracks_iter(
-                    concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
-                    self.genome_fasta,
-                    self.bws,
-                    batch_size=self.batch_size,
-                )
-                concept = Concept(
-                    id=self._reserve_id(),
-                    name=concept_name,
-                    data_iter=_PairedLoader(self._control_seq_dl(), chrom_dl),
-                )
-                self.concepts.append(concept)
-                added.append(concept)
+            concept = Concept(
+                id=self._reserve_id(),
+                name=concept_name + self.concept_name_suffix,
+                data_iter=_PairedLoader(self._control_seq_dl(), chrom_dl),
+            )
+            self.concepts.append(concept)
+            added.append(concept)
         return added
 
     def all_concepts(self) -> List[Concept]:
