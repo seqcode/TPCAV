@@ -4,6 +4,8 @@
 !tpcav/*.py
 !scripts/
 !scripts/*.py
+!examples/
+!examples/*.ipynb
 !test/
 !test/*.py
 !pyproject.toml

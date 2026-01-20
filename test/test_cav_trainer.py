@@ -47,7 +47,7 @@ def transform_fasta_to_one_hot_seq(seq, chrom):
     return (helper.fasta_to_one_hot_sequences(seq),)
 
 
-class CavTrainerIntegrationTest(unittest.TestCase):
+class TPCAVTest(unittest.TestCase):
 
     def test_motif_concepts(self):
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
@@ -116,6 +116,15 @@ class CavTrainerIntegrationTest(unittest.TestCase):
             bed_seq_file="data/hg38_rmsk.head500k.bed",
             output_dir="data/test_run_tpcav_output/",
         )
+
+    def test_write_bw(self):
+        random_regions_1 = helper.random_regions_dataframe(
+            "data/hg38.analysisSet.fa.fai", 1024, 100, seed=1
+        )
+        helper.write_attrs_to_bw(torch.rand((100, 1024)).numpy(), 
+                                 random_regions_1.apply(lambda x: f"{x.chrom}:{x.start}-{x.end}", axis=1).tolist(), 
+                                 "data/hg38.analysisSet.fa.fai", "data/test_run_tpcav_output/input_attrs.bw")
+
 
     def test_all(self):
 

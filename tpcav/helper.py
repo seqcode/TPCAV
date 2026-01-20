@@ -3,10 +3,13 @@
 Lightweight data loading helpers for sequences and chromatin tracks.
 """
 
-from collections import defaultdict
-from pathlib import Path
 from typing import Iterable, List, Optional
 
+import itertools
+import logging
+import pyBigWig
+import re
+import sys
 import numpy as np
 import pandas as pd
 import seqchromloader as scl
@@ -14,6 +17,8 @@ import torch
 from deeplift.dinuc_shuffle import dinuc_shuffle
 from pyfaidx import Fasta
 from seqchromloader.utils import dna2OneHot, extract_bw
+
+logger = logging.getLogger(__name__)
 
 
 def load_bed_and_center(bed_file: str, window: int) -> pd.DataFrame:
@@ -185,3 +190,113 @@ def dinuc_shuffle_sequences(
 
 def fasta_chrom_to_one_hot_seq(seq, chrom):
     return (fasta_to_one_hot_sequences(seq),)
+
+def write_attrs_to_bw(arrs, regions, genome_info, bigwig_fn, smooth=False):
+    """
+    write the attributions into bigwig files
+    shape of arrs should be (# samples, length)
+    Note: If regions overlap with each other, only base pairs not covered by previous regions would be assigned current region's attribution score
+    """
+    # write header into bigwig
+    bw = pyBigWig.open(bigwig_fn, "w")
+    heads = []
+    with open(genome_info, "r") as f:
+        for line in f:
+            chrom, length = line.strip().split("\t")[:2]
+            heads.append((chrom, int(length)))
+    heads = sorted(heads, key=lambda x: x[0])
+    bw.addHeader(heads)
+
+    # sort regions and arrs
+    assert len(regions) == len(arrs)
+
+    def get_key(x):
+        chrom, start, end = re.split("[:-]", regions[x])
+        start = int(start)
+        return chrom, start
+
+    idx_sort = sorted(range(len(regions)), key=get_key)
+    regions = [regions[i] for i in idx_sort]
+    arrs = arrs[idx_sort]
+    # construct iterables
+    it = zip(arrs, regions)
+    it = itertools.chain(
+        it, zip([np.array([-1000])], ["chrNone:10-100"])
+    )  # add pseudo region to make sure the last entry will be added to bw file
+    arr, lastRegion = next(it)
+    lastChrom, start, end = re.split(r"[:-]", lastRegion)
+
+    start = int(start)
+    end = int(end)
+    # extend coordinates if attribution arr is larger than interval length
+    if end - start < len(arr):
+        logger.warning(
+            "Interval length is smaller than attribution array length, expand it!"
+        )
+        diff = len(arr) - (end - start)
+        if diff % 2 != 0:
+            raise Exception(
+                "The difference between attribution array length and interval length is not even! Can't do symmetric extension in this case, exiting..."
+            )
+        start -= int(diff / 2)
+        end += int(diff / 2)
+    elif end - start == len(arr):
+        diff = 0
+    else:
+        raise Exception(
+            "Interval length is larger than attribution array length, this is not expected situation, exiting..."
+        )
+    arr_store_tmp = arr
+    for arr, region in it:
+        rchrom, rstart, rend = re.split(r"[:-]", region)
+        rstart = int(rstart)
+        rend = int(rend)
+        # extend coordinates if attribution arr is larger than interval length
+        rstart -= int(diff / 2)
+        rend += int(diff / 2)
+        if rstart < 0:
+            break
+        if end <= rstart or rchrom != lastChrom:
+            arr_store_tmp = (
+                np.convolve(arr_store_tmp, np.ones(10) / 10, mode="same")
+                if smooth
+                else arr_store_tmp
+            )
+            try:
+                bw.addEntries(
+                    lastChrom,
+                    np.arange(start, end, dtype=np.int64),
+                    values=arr_store_tmp.astype(np.float64),
+                    span=1,
+                )
+            except:
+                print(lastChrom)
+                print(start)
+                print(end)
+                print(arr_store_tmp.shape, arr_store_tmp.dtype)
+                print(rchrom)
+                print(rstart)
+                print(rend)
+                raise Exception(
+                    "Runtime error when adding entries to bigwig file, see above messages for region info"
+                )
+            lastChrom = rchrom
+            start = rstart
+            end = rend
+            arr_store_tmp = arr
+        # get uncovered interval (defined by start coordinate `start` and relative start coordinate `start_idx`)
+        else:
+            assert (
+                end > rstart and rchrom == lastChrom
+            )  # just double check make sure two intervals are overlapped
+            start_idx = end - rstart
+            end = rend
+            try:
+                arr_store_tmp = np.concatenate([arr_store_tmp, arr[start_idx:]])
+            except TypeError:
+                print(start_idx)
+                print(rstart, rend, rchrom, start, end, lastChrom)
+                print(arr_store_tmp.shape, print(arr.shape))
+                sys.exit(1)
+    bw.close()
+
