@@ -60,5 +60,5 @@ print(bed_cav_trainer.cav_weights)
 
 For detailed usage, please refer to this [jupyter notebook](https://github.com/seqcode/TPCAV/tree/main/examples/tpcav_detailed_usage.ipynb)
 
-If you find any issue, feel free to open an issue (strongly suggested) or contact [Jianyu Yang](jmy5455@psu.edu).
+If you find any issue, feel free to open an issue (strongly suggested) or contact [Jianyu Yang](mailto:jmy5455@psu.edu).
 
