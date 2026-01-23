@@ -8,6 +8,8 @@ This repository contains code to compute TPCAV (Testing with PCA projected Conce
 
 ## Quick start
 
+> `tpcav` only works with Pytorch model, if your model is built using other libraries, you should port the model into Pytorch first. For Tensorflow models, you can use [tf2onnx](https://github.com/onnx/tensorflow-onnx) and [onnx2pytorch](https://github.com/Talmaj/onnx2pytorch) for the conversion.
+
 ```python
 import torch
 from tpcav import run_tpcav
