@@ -6,6 +6,7 @@ CAV training and attribution utilities built on TPCAV.
 import logging
 import multiprocessing
 from collections import defaultdict
+import os
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Dict
 
@@ -414,6 +415,9 @@ def run_tpcav(
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
     """
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     output_path = Path(output_dir)
     # create concept builder to generate concepts
     ## motif concepts
@@ -442,16 +446,16 @@ def run_tpcav(
         motif_concept_builders.append(builder)
 
     ## bed concepts (optional)
-    bed_builder = ConceptBuilder(
-        genome_fasta=genome_fasta,
-        input_window_length=1024,
-        bws=bws,
-        num_motifs=0,
-        include_reverse_complement=True,
-        min_samples=num_samples_for_cav,
-        batch_size=8,
-    )
     if bed_seq_file is not None or bed_chrom_file is not None:
+        bed_builder = ConceptBuilder(
+            genome_fasta=genome_fasta,
+            input_window_length=1024,
+            bws=bws,
+            num_motifs=0,
+            include_reverse_complement=True,
+            min_samples=num_samples_for_cav,
+            batch_size=8,
+        )
         # use random regions as control
         bed_builder.build_control()
         if bed_seq_file is not None:
@@ -462,12 +466,14 @@ def run_tpcav(
             bed_builder.add_bed_chrom_concepts(bed_chrom_file)
         # apply transform to convert fasta sequences to one-hot encoded sequences
         bed_builder.apply_transform(input_transform_func)
+    else:
+        bed_builder = None
 
     # create TPCAV model on top of the given model
     tpcav_model = TPCAV(model, layer_name=layer_name)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
     tpcav_model.fit_pca(
-        concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts,
+        concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts if  bed_builder is not None else motif_concept_builders[-1].all_concepts(),
         num_samples_per_concept=num_samples_for_pca,
         num_pc="full",
     )
@@ -490,16 +496,19 @@ def run_tpcav(
                 num_processes=4,
             )
         motif_cav_trainers[nm] = cav_trainer
-    bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
-    bed_cav_trainer.set_control(
-        bed_builder.control_concepts[0], num_samples=num_samples_for_cav
-    )
-    bed_cav_trainer.train_concepts(
-        bed_builder.concepts,
-        num_samples_for_cav,
-        output_dir=str(output_path / f"cavs_bed_concepts/"),
-        num_processes=4,
-    )
+    if bed_builder is not None:
+        bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
+        bed_cav_trainer.set_control(
+            bed_builder.control_concepts[0], num_samples=num_samples_for_cav
+        )
+        bed_cav_trainer.train_concepts(
+            bed_builder.concepts,
+            num_samples_for_cav,
+            output_dir=str(output_path / f"cavs_bed_concepts/"),
+            num_processes=4,
+        )
+    else:
+        bed_cav_trainer = None
 
     if len(num_motif_insertions) > 1:
         cavs_fscores_df = compute_motif_auc_fscore(num_motif_insertions, list(motif_cav_trainers.values()), meme_motif_file=meme_motif_file)
