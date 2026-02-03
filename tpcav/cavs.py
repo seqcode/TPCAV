@@ -7,8 +7,9 @@ import logging
 import multiprocessing
 from collections import defaultdict
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple, Dict
 
+from Bio import motifs
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -19,8 +20,9 @@ from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import GridSearchCV
 from torch.utils.data import DataLoader, TensorDataset, random_split
+from sklearn.linear_model import LinearRegression
 
-from . import helper
+from . import helper, utils
 from .concepts import ConceptBuilder
 from .tpcav_model import TPCAV
 
@@ -302,7 +304,7 @@ class CavTrainer:
         cavs_names_pass = []
         for cname in cavs_names:
             if self.cavs_fscores[cname] >= fscore_thresh:
-                cavs_pass.append(self.cav_weights[cname])
+                cavs_pass.append(self.cav_weights[cname].cpu().numpy())
                 cavs_names_pass.append(cname)
             else:
                 logger.info(
@@ -361,6 +363,39 @@ class CavTrainer:
 
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
 
+def load_motifs_from_meme(motif_meme_file):
+    return {utils.clean_motif_name(m.name): m for m in motifs.parse(open(motif_meme_file), fmt="MINIMAL")}
+
+def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List[CavTrainer], meme_motif_file: str | None = None):
+    cavs_fscores_df = pd.DataFrame({nm: cav_trainer.cavs_fscores for nm, cav_trainer in zip(num_motif_insertions, cav_trainers)})
+    cavs_fscores_df['concept'] = list(cav_trainers[0].cavs_fscores.keys())
+
+    def compute_auc_fscore(row):
+        y = [row[nm] for nm in num_motif_insertions]
+        return np.trapz(y, num_motif_insertions) / (
+            num_motif_insertions[-1] - num_motif_insertions[0]
+        )
+
+    cavs_fscores_df["AUC_fscores"] = cavs_fscores_df.apply(compute_auc_fscore, axis=1)
+
+    # if motif instances are provided, fit linear regression curve to remove the dependency of f-scores on information content and motif lengthj
+    if meme_motif_file is not None:
+        motifs_dict = load_motifs_from_meme(meme_motif_file)
+        cavs_fscores_df['information_content'] = cavs_fscores_df.apply(lambda x: motifs_dict[x['concept']].relative_entropy.sum(), axis=1)
+        cavs_fscores_df['motif_len'] = cavs_fscores_df.apply(lambda x: len(motifs_dict[x['concept']].consensus), axis=1)
+        
+        model = LinearRegression()
+        model.fit(cavs_fscores_df[['information_content', 'motif_len']].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
+        
+        y_pred = model.predict(cavs_fscores_df[['information_content', 'motif_len']].to_numpy())
+        residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
+        cavs_fscores_df['AUC_fscores_residual'] = residuals
+
+        cavs_fscores_df.sort_values("AUC_fscores_residual", ascending=False, inplace=True)
+    else:
+        cavs_fscores_df.sort_values("AUC_fscores", ascending=False, inplace=True)
+
+    return cavs_fscores_df
 
 def run_tpcav(
     model,
@@ -376,9 +411,13 @@ def run_tpcav(
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
 ):
+    """
+    One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
+    """
     output_path = Path(output_dir)
     # create concept builder to generate concepts
     ## motif concepts
+    motif_concepts_pairs = {}
     motif_concept_builders = []
     num_motif_insertions.sort()
     for nm in num_motif_insertions:
@@ -394,12 +433,14 @@ def run_tpcav(
         # use random regions as control
         builder.build_control()
         # use meme motif PWMs to build motif concepts, one concept per motif
-        builder.add_meme_motif_concepts(str(meme_motif_file))
+        concepts_pairs = builder.add_meme_motif_concepts(str(meme_motif_file))
 
         # apply transform to convert fasta sequences to one-hot encoded sequences
         builder.apply_transform(input_transform_func)
 
+        motif_concepts_pairs[nm] = concepts_pairs
         motif_concept_builders.append(builder)
+
     ## bed concepts (optional)
     bed_builder = ConceptBuilder(
         genome_fasta=genome_fasta,
@@ -422,7 +463,7 @@ def run_tpcav(
         # apply transform to convert fasta sequences to one-hot encoded sequences
         bed_builder.apply_transform(input_transform_func)
 
-    # create TPCAV model on top of your model
+    # create TPCAV model on top of the given model
     tpcav_model = TPCAV(model, layer_name=layer_name)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
     tpcav_model.fit_pca(
@@ -434,19 +475,20 @@ def run_tpcav(
 
     # create trainer for computing CAVs
     motif_cav_trainers = {}
-    for nm, builder in zip(num_motif_insertions, motif_concept_builders):
+    for nm in num_motif_insertions:
         cav_trainer = CavTrainer(tpcav_model, penalty="l2")
-        # set control concept for CAV training
-        cav_trainer.set_control(
-            builder.control_concepts[0], num_samples=num_samples_for_cav
-        )
-        # train CAVs for all concepts
-        cav_trainer.train_concepts(
-            builder.concepts,
-            num_samples_for_cav,
-            output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-            num_processes=4,
-        )
+        for motif_concept, permuted_concept in motif_concepts_pairs[nm]:
+            # set control concept for CAV training
+            cav_trainer.set_control(
+                permuted_concept, num_samples=num_samples_for_cav
+            )
+            # train CAVs for all concepts
+            cav_trainer.train_concepts(
+                [motif_concept,],
+                num_samples_for_cav,
+                output_dir=str(output_path / f"cavs_{nm}_motifs/"),
+                num_processes=4,
+            )
         motif_cav_trainers[nm] = cav_trainer
     bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
     bed_cav_trainer.set_control(
@@ -459,22 +501,9 @@ def run_tpcav(
         num_processes=4,
     )
 
-    # iterate over all trained motif cav trainers to compute AUC of f-scores
-    fscore_results = defaultdict(dict)
-    for concept in motif_concept_builders[-1].concepts:
-        cname = concept.name
-        for nm, cav_trainer in motif_cav_trainers.items():
-            fscore = cav_trainer.cavs_fscores[cname]
-            fscore_results[nm][cname] = fscore
-    fscore_df = pd.DataFrame(fscore_results)
+    if len(num_motif_insertions) > 1:
+        cavs_fscores_df = compute_motif_auc_fscore(num_motif_insertions, list(motif_cav_trainers.values()), meme_motif_file=meme_motif_file)
+    else:
+        cavs_fscores_df = None
 
-    def compute_auc_fscore(row):
-        y = [row[nm] for nm in num_motif_insertions]
-        return np.trapz(y, num_motif_insertions) / (
-            num_motif_insertions[-1] - num_motif_insertions[0]
-        )
-
-    fscore_df["AUC_fscore"] = fscore_df.apply(compute_auc_fscore, axis=1)
-    fscore_df.sort_values("AUC_fscore", ascending=False, inplace=True)
-
-    return fscore_df, motif_cav_trainers, bed_cav_trainer
+    return cavs_fscores_df, motif_cav_trainers, bed_cav_trainer

@@ -18,6 +18,8 @@ from torch.utils.data import default_collate, get_worker_info
 
 logger = logging.getLogger(__name__)
 
+def clean_motif_name(motif_name):
+    return motif_name.replace("/", "-")
 
 def center_windows(df, window_len=1024):
     "Get center window_len bp region of the given coordinate dataframe."
@@ -568,10 +570,101 @@ class CustomMotif:
     def __len__(self):
         return len(self.consensus)
 
+    def permute(self, seed=None, min_shift=0.3, name_suffix="_perm", max_attempts=100):
+        """
+        Permute the consensus sequence, return the object
+        """
+        permuted = deepcopy(self)
+
+        rng = np.random.default_rng(seed)
+        L = len(self.consensus)
+        
+        count = 0
+        while True:
+            perm = rng.permutation(L)
+            frac_moved = np.mean(perm != np.arange(L))
+            if frac_moved >= min_shift:
+                break
+            else:
+                count += 1
+            if count > max_attempts:
+                raise ValueError(
+                    f"Could not generate a permutation with min_shift={min_shift} for motif {self.name}"
+                )
+        permuted_consensus = ''.join([self.consensus[i] for i in perm])
+        permuted.consensus = permuted_consensus
+        permuted.name = self.name + name_suffix
+        permuted.matrix_id = self.name + name_suffix
+
+        return permuted
+
     def reverse_complement(self):
         self.consensus = Bio.Seq.reverse_complement(self.consensus)
         self.name = self.name + "_rc"
         return self
+
+class PermutedPWMMotif:
+    BASES = ("A", "C", "G", "T")
+    RC_MAP = {"A": "T", "C": "G", "G": "C", "T": "A"}
+
+    def __init__(self, motif, seed=None, min_shift=0.3, name_suffix="_perm"):
+        """
+        motif: Bio.motifs.Motif
+        seed: RNG seed
+        min_shift: fraction of positions that must move
+        """
+        self.original_motif = motif
+        self.name = motif.name + name_suffix if motif.name else "permuted_motif"
+        self.length = motif.length
+        self.alphabet = motif.alphabet
+
+        # extract PWM as dict of lists
+        pwm = {b: list(motif.pwm[b]) for b in self.BASES}
+
+        self.pwm, self.permutation = self._permute_pwm_positions(
+            pwm, seed=seed, min_shift=min_shift
+        )
+
+    def __len__(self):
+        return self.length
+
+    def _permute_pwm_positions(self, pwm, seed=None, min_shift=0.3):
+        rng = np.random.default_rng(seed)
+        L = len(pwm["A"])
+
+        count = 0
+        while True:
+            perm = rng.permutation(L)
+            frac_moved = np.mean(perm != np.arange(L))
+            if frac_moved >= min_shift:
+                break
+            else:
+                count += 1
+            if count > 100:
+                raise ValueError(
+                    f"Could not generate a permutation with min_shift={min_shift} for motif {self.original_motif.name}"
+                )
+
+        permuted_pwm = {b: [pwm[b][i] for i in perm] for b in self.BASES}
+
+        return permuted_pwm, perm
+
+    def reverse_complement(self):
+        """
+        Return a NEW PermutedMotif with reverse-complemented PWM
+        """
+        rc_pwm = {b: [] for b in self.BASES}
+        L = len(self.pwm["A"])
+
+        for i in reversed(range(L)):
+            for b in self.BASES:
+                rc_base = self.RC_MAP[b]
+                rc_pwm[rc_base].append(self.pwm[b][i])
+
+        rc = deepcopy(self)
+        rc.pwm = rc_pwm
+        rc.name = self.name + "_rc"
+        return rc
 
 
 class PairedMotif:

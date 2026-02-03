@@ -2,6 +2,7 @@ import logging
 from functools import partial
 from typing import Dict, Iterable, List, Optional, Tuple
 
+import numpy as np
 import torch
 from captum.attr import DeepLift
 from scipy.linalg import svd
@@ -48,7 +49,7 @@ class TPCAV(torch.nn.Module):
             "layer_name": self.layer_name,
             "zscore_mean": getattr(self, "zscore_mean", None),
             "zscore_std": getattr(self, "zscore_std", None),
-            "pca_inv": getattr(self, "pca_inv", None),
+            "Vh": getattr(self, "Vh", None),
             "orig_shape": getattr(self, "orig_shape", None),
         }
 
@@ -57,7 +58,7 @@ class TPCAV(torch.nn.Module):
         self.layer_name = tpcav_state_dict["layer_name"]
         self._set_buffer("zscore_mean", tpcav_state_dict["zscore_mean"])
         self._set_buffer("zscore_std", tpcav_state_dict["zscore_std"])
-        self._set_buffer("pca_inv", tpcav_state_dict["pca_inv"])
+        self._set_buffer("Vh", tpcav_state_dict["Vh"])
         self._set_buffer("orig_shape", tpcav_state_dict["orig_shape"])
         self.fitted = True
         logger.warning(
@@ -87,20 +88,22 @@ class TPCAV(torch.nn.Module):
         std[std == 0] = -1
         standardized = (flat - mean) / std
 
-        v_inverse = None
         if num_pc is None or num_pc == "full":
-            _, _, v = svd(standardized, lapack_driver="gesvd", full_matrices=False)
-            v_inverse = torch.tensor(v)
+            _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
+            Vh = torch.tensor(Vh)
         elif int(num_pc) == 0:
-            v_inverse = None
+            S = None
+            Vh = None
         else:
-            _, _, v = svd(standardized, lapack_driver="gesvd", full_matrices=False)
-            v_inverse = torch.tensor(v[: int(num_pc)])
+            _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
+            Vh = torch.tensor(Vh[: int(num_pc)])
+
+        self.eigen_values = np.square(S) if S is not None else None
 
         self._set_buffer("zscore_mean", mean.to(self.device))
         self._set_buffer("zscore_std", std.to(self.device))
         self._set_buffer(
-            "pca_inv", v_inverse.to(self.device) if v_inverse is not None else None
+            "Vh", Vh.to(self.device) if Vh is not None else None
         )
         self._set_buffer("orig_shape", torch.tensor(orig_shape).to(self.device))
         self.fitted = True
@@ -108,7 +111,7 @@ class TPCAV(torch.nn.Module):
         return {
             "zscore_mean": mean,
             "zscore_std": std,
-            "pca_inv": v_inverse,
+            "Vh": Vh,
             "orig_shape": torch.tensor(orig_shape),
         }
 
@@ -120,13 +123,13 @@ class TPCAV(torch.nn.Module):
             raise RuntimeError("Call fit_pca before projecting activations.")
 
         y = activations.flatten(start_dim=1).to(self.device)
-        if self.pca_inv is not None:
-            V = self.pca_inv.T
+        if self.Vh is not None:
+            V = self.Vh.T
             zscore_mean = getattr(self, "zscore_mean", 0.0)
             zscore_std = getattr(self, "zscore_std", 1.0)
             y_standardized = (y - zscore_mean) / zscore_std
             y_projected = torch.matmul(y_standardized, V)
-            y_residual = y_standardized - torch.matmul(y_projected, self.pca_inv)
+            y_residual = y_standardized - torch.matmul(y_projected, self.Vh)
             return y_residual, y_projected
         else:
             return y, None
@@ -326,7 +329,7 @@ class TPCAV(torch.nn.Module):
         Combine projected/residual embeddings into the layer activation space,
         mirroring scripts/models.py merge logic.
         """
-        y_hat = torch.matmul(avs_projected, self.pca_inv) + avs_residual
+        y_hat = torch.matmul(avs_projected, self.Vh) + avs_residual
         y_hat = y_hat * self.zscore_std + self.zscore_mean
 
         return y_hat.reshape((-1, *self.orig_shape[1:]))

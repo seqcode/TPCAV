@@ -49,7 +49,7 @@ def transform_fasta_to_one_hot_seq(seq, chrom):
 
 class TPCAVTest(unittest.TestCase):
 
-    def test_motif_concepts(self):
+    def test_motif_concepts_insertion(self):
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
         self.assertTrue(motif_path.exists(), "Motif file is missing")
 
@@ -107,15 +107,16 @@ class TPCAVTest(unittest.TestCase):
         model = DummyModelSeq()
         layer_name = "layer1"
 
-        run_tpcav(
+        cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
             model=model,
             layer_name=layer_name,
             meme_motif_file=str(motif_path),
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
-            bed_seq_file="data/hg38_rmsk.head500k.bed",
+            bed_seq_file="data/hg38_rmsk.head50k.bed",
             output_dir="data/test_run_tpcav_output/",
         )
+        print(cavs_fscores_df)
 
     def test_write_bw(self):
         random_regions_1 = helper.random_regions_dataframe(
@@ -124,6 +125,37 @@ class TPCAVTest(unittest.TestCase):
         helper.write_attrs_to_bw(torch.rand((100, 1024)).numpy(), 
                                  random_regions_1.apply(lambda x: f"{x.chrom}:{x.start}-{x.end}", axis=1).tolist(), 
                                  "data/hg38.analysisSet.fa.fai", "data/test_run_tpcav_output/input_attrs.bw")
+
+    def test_motif_concepts_against_permute_control(self):
+        motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
+        self.assertTrue(motif_path.exists(), "Motif file is missing")
+
+        builder = ConceptBuilder(
+            genome_fasta="data/hg38.analysisSet.fa",
+            input_window_length=1024,
+            bws=None,
+            num_motifs=16,
+            include_reverse_complement=True,
+            min_samples=1000,
+            batch_size=8,
+        )
+
+        builder.build_control()
+
+        concepts_pairs = builder.add_meme_motif_concepts(str(motif_path), build_permute_control=True)
+        builder.apply_transform(transform_fasta_to_one_hot_seq)
+
+        tpcav_model = TPCAV(DummyModelSeq(), layer_name="layer1")
+        tpcav_model.fit_pca(
+            concepts=builder.all_concepts(),
+            num_samples_per_concept=10,
+            num_pc="full",
+        )
+        cav_trainer = CavTrainer(tpcav_model)
+
+        for motif_concept, permute_concept in concepts_pairs:
+            cav_trainer.set_control(permute_concept, 200)
+            cav_trainer.train_concepts([motif_concept,], 200, output_dir="data/cavs_permute/", num_processes=2)
 
 
     def test_all(self):

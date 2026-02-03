@@ -21,15 +21,15 @@ class _PairedLoader:
     def __init__(self, seq_dl: Iterable, chrom_dl: Iterable) -> None:
         self.seq_dl = seq_dl
         self.chrom_dl = chrom_dl
-        self.apply_func = None
+        self.apply_func_list = []
 
     def apply(self, apply_func):
-        self.apply_func = apply_func
+        self.apply_func_list.append(apply_func)
 
     def __iter__(self):
         for inputs in zip(self.seq_dl, self.chrom_dl):
-            if self.apply_func:
-                inputs = self.apply_func(*inputs)
+            for apply_func in self.apply_func_list:
+                inputs = apply_func(*inputs)
             yield inputs
 
 
@@ -146,76 +146,74 @@ class ConceptBuilder:
         return chrom_iter
 
     def add_custom_motif_concepts(
-        self, motif_table: str, control_regions: Optional[pd.DataFrame] = None
-    ) -> List[Concept]:
+        self, motif_table: str, control_regions: Optional[pd.DataFrame] = None, build_permute_control=True
+    ) -> List[Concept] | List[Tuple[Concept]]:
         """Add concepts from a tab-delimited motif table: motif_name<TAB>consensus."""
-        if control_regions is None:
-            if not self.control_concepts:
-                raise ValueError("Call build_control or pass control_regions first.")
-            control_regions = self.metadata.get("control_regions")
-        assert control_regions is not None
         df = pd.read_table(motif_table, names=["motif_name", "consensus_seq"])
-        added: List[Concept] = []
+        added = []
         for motif_name in np.unique(df.motif_name):
+            motif_name = utils.clean_motif_name(motif_name)
             consensus = df.loc[df.motif_name == motif_name, "consensus_seq"].tolist()
             motifs = []
             for idx, cons in enumerate(consensus):
                 motif = utils.CustomMotif(f"{motif_name}_{idx}", cons)
                 motifs.append(motif)
-                if self.include_reverse_complement:
-                    motifs.append(motif.reverse_complement())
-            seq_dl = _construct_motif_concept_dataloader_from_control(
-                control_regions,
-                self.genome_fasta,
-                motifs=motifs,
-                num_motifs=self.num_motifs,
-                motif_mode="consensus",
-                batch_size=self.batch_size,
-                num_workers=self.num_workers,
-            )
-            concept = Concept(
-                id=self._reserve_id(),
-                name=motif_name + self.concept_name_suffix,
-                data_iter=_PairedLoader(seq_dl, self._control_chrom_dl()),
-            )
+            concept = self.build_motif_concept(motifs, motif_name, control_regions=control_regions, motif_mode="consensus")
             self.concepts.append(concept)
-            added.append(concept)
+            # build permute control if specified
+            if build_permute_control:
+                motifs_permuted = [m.permute() for m in motifs]
+                concept_permuted = self.build_motif_concept(motifs_permuted, motif_name + "_perm", control_regions=control_regions, motif_mode="consensus")
+                self.control_concepts.append(concept_permuted)
+                added.append((concept, concept_permuted))
+            else:
+                added.append(concept)
         return added
 
     def add_meme_motif_concepts(
-        self, meme_file: str, control_regions: Optional[pd.DataFrame] = None
-    ) -> List[Concept]:
+        self, meme_file: str, control_regions: Optional[pd.DataFrame] = None, build_permute_control=True) -> List[Concept] | List[Tuple[Concept]]:
         """Add concepts from a MEME minimal-format motif file."""
+
+        added = []
+        with open(meme_file) as handle:
+            for motif in Bio_motifs.parse(handle, fmt="MINIMAL"):
+                motif_name = utils.clean_motif_name(motif.name)
+                concept = self.build_motif_concept([motif,], motif_name, control_regions=control_regions, motif_mode="pwm")
+                self.concepts.append(concept)
+                # build permute control if specified
+                if build_permute_control:
+                    motif_permuted = utils.PermutedPWMMotif(motif)
+                    concept_permuted = self.build_motif_concept([motif_permuted,], motif_name + "_perm", control_regions=control_regions, motif_mode="pwm")
+                    self.control_concepts.append(concept_permuted)
+                    added.append((concept, concept_permuted))
+                else:
+                    added.append(concept)
+        return added
+
+    def build_motif_concept(self, motifs, concept_name, control_regions=None, motif_mode="pwm"):
         if control_regions is None:
             if not self.control_concepts:
                 raise ValueError("Call build_control or pass control_regions first.")
             control_regions = self.metadata.get("control_regions")
         assert control_regions is not None
 
-        added: List[Concept] = []
-        with open(meme_file) as handle:
-            for motif in Bio_motifs.parse(handle, fmt="MINIMAL"):
-                motifs = [motif]
-                if self.include_reverse_complement:
-                    motifs.append(motif.reverse_complement())
-                motif_name = motif.name.replace("/", "-")
-                seq_dl = _construct_motif_concept_dataloader_from_control(
-                    control_regions,
-                    self.genome_fasta,
-                    motifs=motifs,
-                    num_motifs=self.num_motifs,
-                    motif_mode="pwm",
-                    batch_size=self.batch_size,
-                    num_workers=self.num_workers,
-                )
-                concept = Concept(
-                    id=self._reserve_id(),
-                    name=motif_name + self.concept_name_suffix,
-                    data_iter=_PairedLoader(seq_dl, self._control_chrom_dl()),
-                )
-                self.concepts.append(concept)
-                added.append(concept)
-        return added
+        if self.include_reverse_complement:
+            motifs.extend([m.reverse_complement() for m in motifs])
+        seq_dl = _construct_motif_concept_dataloader_from_control(
+            control_regions,
+            self.genome_fasta,
+            motifs=motifs,
+            num_motifs=self.num_motifs,
+            motif_mode=motif_mode,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+        )
+        concept = Concept(
+            id=self._reserve_id(),
+            name=concept_name + self.concept_name_suffix,
+            data_iter=_PairedLoader(seq_dl, self._control_chrom_dl()),
+        )
+        return concept
 
     def add_bed_sequence_concepts(self, bed_path: str) -> List[Concept]:
         """Add concepts backed by BED sequences with concept_name in column 5."""
