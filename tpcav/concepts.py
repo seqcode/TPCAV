@@ -41,6 +41,8 @@ def _construct_motif_concept_dataloader_from_control(
     motif_mode: str,
     batch_size: int,
     num_workers: int,
+    start_buffer=0,
+    end_buffer=0
 ) -> DataLoader:
     """Mirror the motif-based dataloader logic used in the TCAV script."""
     datasets = []
@@ -51,8 +53,8 @@ def _construct_motif_concept_dataloader_from_control(
             motif=motif,
             motif_mode=motif_mode,
             num_motifs=num_motifs,
-            start_buffer=0,
-            end_buffer=0,
+            start_buffer=start_buffer,
+            end_buffer=end_buffer,
             print_warning=False,
             infinite=False,
         )
@@ -190,7 +192,7 @@ class ConceptBuilder:
                     added.append(concept)
         return added
 
-    def build_motif_concept(self, motifs, concept_name, control_regions=None, motif_mode="pwm"):
+    def build_motif_concept(self, motifs, concept_name, control_regions=None, motif_mode="pwm", start_buffer=0, end_buffer=0):
         if control_regions is None:
             if not self.control_concepts:
                 raise ValueError("Call build_control or pass control_regions first.")
@@ -207,6 +209,8 @@ class ConceptBuilder:
             motif_mode=motif_mode,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
+            start_buffer=start_buffer,
+            end_buffer=end_buffer
         )
         concept = Concept(
             id=self._reserve_id(),
