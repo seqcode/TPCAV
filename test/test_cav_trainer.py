@@ -182,7 +182,9 @@ class TPCAVTest(unittest.TestCase):
 
         self.assertTupleEqual(batch[0].shape, (builder.batch_size, 4, 1024))
 
-        tpcav_model = TPCAV(DummyModelSeq(), layer_name="layer1")
+        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+
+        tpcav_model = TPCAV(DummyModelSeq(), layer_name="layer1").to(device)
         tpcav_model.fit_pca(
             concepts=builder.all_concepts(),
             num_samples_per_concept=10,

@@ -205,8 +205,8 @@ class CavTrainer:
                     c, num_samples=num_samples
                 )
                 fscore, weight = _train(
-                    concept_embeddings,
-                    self.control_embeddings,
+                    concept_embeddings.cpu(),
+                    self.control_embeddings.cpu(),
                     Path(output_dir) / c.name,
                     self.penalty,
                 )
@@ -223,8 +223,8 @@ class CavTrainer:
                 res = pool.apply_async(
                     _train,
                     args=(
-                        concept_embeddings,
-                        self.control_embeddings,
+                        concept_embeddings.cpu(),
+                        self.control_embeddings.cpu(),
                         Path(output_dir) / c.name,
                         self.penalty,
                     ),
@@ -413,6 +413,7 @@ def run_tpcav(
     batch_size=8,
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
+    fit_pca=True,
     p=4
 ):
     """
@@ -475,11 +476,12 @@ def run_tpcav(
     # create TPCAV model on top of the given model
     tpcav_model = TPCAV(model, layer_name=layer_name)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
-    tpcav_model.fit_pca(
-        concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts if  bed_builder is not None else motif_concept_builders[-1].all_concepts(),
-        num_samples_per_concept=num_samples_for_pca,
-        num_pc="full",
-    )
+    if fit_pca:
+        tpcav_model.fit_pca(
+            concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts if  bed_builder is not None else motif_concept_builders[-1].all_concepts(),
+            num_samples_per_concept=num_samples_for_pca,
+            num_pc="full",
+        )
     #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
     # create trainer for computing CAVs

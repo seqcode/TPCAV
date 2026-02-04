@@ -140,7 +140,7 @@ class TPCAV(torch.nn.Module):
         residual, projected = self.project_activations(avs)
         if projected is not None:
             return torch.cat((projected, residual), dim=1)
-        return residual
+        return residual.detach()
 
     def forward_from_embeddings_at_layer(
         self,
