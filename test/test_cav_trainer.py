@@ -116,7 +116,6 @@ class TPCAVTest(unittest.TestCase):
             bed_seq_file="data/hg38_rmsk.head50k.bed",
             output_dir="data/test_run_tpcav_output/",
         )
-        print(cavs_fscores_df)
 
     def test_write_bw(self):
         random_regions_1 = helper.random_regions_dataframe(

@@ -477,7 +477,7 @@ def run_tpcav(
         num_samples_per_concept=num_samples_for_pca,
         num_pc="full",
     )
-    torch.save(tpcav_model, output_path / "tpcav_model.pt")
+    #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
     # create trainer for computing CAVs
     motif_cav_trainers = {}
