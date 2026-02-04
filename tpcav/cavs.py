@@ -409,8 +409,11 @@ def run_tpcav(
     output_dir: str = "tpcav/",
     num_samples_for_pca=10,
     num_samples_for_cav=1000,
+    input_window_length=1024,
+    batch_size=8,
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
+    p=4
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -427,12 +430,12 @@ def run_tpcav(
     for nm in num_motif_insertions:
         builder = ConceptBuilder(
             genome_fasta=genome_fasta,
-            input_window_length=1024,
+            input_window_length=input_window_length,
             bws=bws,
             num_motifs=nm,
             include_reverse_complement=True,
             min_samples=num_samples_for_cav,
-            batch_size=8,
+            batch_size=batch_size,
         )
         # use random regions as control
         builder.build_control()
@@ -449,12 +452,12 @@ def run_tpcav(
     if bed_seq_file is not None or bed_chrom_file is not None:
         bed_builder = ConceptBuilder(
             genome_fasta=genome_fasta,
-            input_window_length=1024,
+            input_window_length=input_window_length,
             bws=bws,
             num_motifs=0,
             include_reverse_complement=True,
             min_samples=num_samples_for_cav,
-            batch_size=8,
+            batch_size=batch_size,
         )
         # use random regions as control
         bed_builder.build_control()
@@ -493,7 +496,7 @@ def run_tpcav(
                 [motif_concept,],
                 num_samples_for_cav,
                 output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                num_processes=4,
+                num_processes=p,
             )
         motif_cav_trainers[nm] = cav_trainer
     if bed_builder is not None:
@@ -505,7 +508,7 @@ def run_tpcav(
             bed_builder.concepts,
             num_samples_for_cav,
             output_dir=str(output_path / f"cavs_bed_concepts/"),
-            num_processes=4,
+            num_processes=p,
         )
     else:
         bed_cav_trainer = None
