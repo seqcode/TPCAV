@@ -1,4 +1,5 @@
-# TPCAV (Testing with PCA projected Concept Activation Vectors)
+# TPCAV 
+> Testing with PCA projected Concept Activation Vectors
 
 This repository contains code to compute TPCAV (Testing with PCA projected Concept Activation Vectors) on deep learning models. TPCAV is an extension of the original TCAV method, which uses PCA to reduce the dimensionality of the activations at a selected intermediate layer before computing Concept Activation Vectors (CAVs) to improve the consistency of the results.
 
