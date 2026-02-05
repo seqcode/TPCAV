@@ -26,6 +26,7 @@ class TPCAV(torch.nn.Module):
         model,
         device: Optional[str] = None,
         layer_name: Optional[str] = None,
+        layer: Optional[torch.nn.Module] = None
     ) -> None:
         """
         layer_name: optional module name to intercept activations via forward hook
@@ -37,33 +38,17 @@ class TPCAV(torch.nn.Module):
         self.model.to(self.device)
         self.model.eval()
         self.fitted = False
-        self.layer_name = layer_name
+        if layer is not None:
+            self.layer = layer
+        elif layer_name is not None:
+            self.layer = self._resolve_layer(layer_name)
+        else:
+            raise Exception("You have to specify either layer or layer_name to construct TPCAV model")
+
 
     def list_module_names(self) -> List[str]:
         """List all module names in the model for layer selection."""
         return [name for name, _ in self.model.named_modules()]
-
-    def tpcav_state_dict(self) -> Dict:
-        """Export TPCAV buffers."""
-        return {
-            "layer_name": self.layer_name,
-            "zscore_mean": getattr(self, "zscore_mean", None),
-            "zscore_std": getattr(self, "zscore_std", None),
-            "Vh": getattr(self, "Vh", None),
-            "orig_shape": getattr(self, "orig_shape", None),
-        }
-
-    def restore_tpcav_state(self, tpcav_state_dict: Dict) -> None:
-        """Load PCA buffers from disk."""
-        self.layer_name = tpcav_state_dict["layer_name"]
-        self._set_buffer("zscore_mean", tpcav_state_dict["zscore_mean"])
-        self._set_buffer("zscore_std", tpcav_state_dict["zscore_std"])
-        self._set_buffer("Vh", tpcav_state_dict["Vh"])
-        self._set_buffer("orig_shape", tpcav_state_dict["orig_shape"])
-        self.fitted = True
-        logger.warning(
-            "Restored TPCAV state, please set model attribute!\n\n Example: self.model = Model_class()",
-        )
 
     def fit_pca(
         self,
@@ -154,9 +139,6 @@ class TPCAV(torch.nn.Module):
         If layer_name is not set, falls back to forward_with_embeddings which
         expects model.forward_from_projected_and_residual to exist.
         """
-        name = self.layer_name
-        if name is None:
-            raise ValueError("layer name must be defined")
         if model_inputs is None:
             raise ValueError(
                 "model_inputs (seq, chrom) must be provided to run forward."
@@ -296,16 +278,12 @@ class TPCAV(torch.nn.Module):
 
     def _layer_output(self, *inputs: Tuple[torch.Tensor]) -> torch.Tensor:
         """Return activations from the configured layer or model hook."""
-        if self.layer_name is None:
-            # No layer configured; return model output directly.
-            self.model(*inputs)
-        layer = self._resolve_layer(self.layer_name)
         cache: List[torch.Tensor] = []
 
         def hook_fn(_module, _inputs, output):
             cache.append(output)
 
-        handle = layer.register_forward_hook(hook_fn)
+        handle = self.layer.register_forward_hook(hook_fn)
         try:
             inputs = [inp.to(self.device) if inp is not None else inp for inp in inputs]
             _ = self.model(*inputs)
@@ -357,11 +335,6 @@ class TPCAV(torch.nn.Module):
         """
         Full forward pass with optional activation replacement and/or CAV-based gradient muting.
         """
-        name = self.layer_name
-        if name is None:
-            raise ValueError("layer_name must be set on TPCAV to use forward_patched.")
-        layer = self._resolve_layer(name)
-
         def hook_fn(_module, _inputs, output):
             y = layer_activation if layer_activation is not None else output
             if cavs_list is None or len(cavs_list) == 0:
@@ -370,7 +343,7 @@ class TPCAV(torch.nn.Module):
                 y, cavs_list, mute_x_avs=mute_x_avs, mute_remainder=mute_remainder
             )
 
-        handle = layer.register_forward_hook(hook_fn)
+        handle = self.layer.register_forward_hook(hook_fn)
         try:
             output = self.model(*[i.to(self.device) for i in model_inputs])
         finally:
