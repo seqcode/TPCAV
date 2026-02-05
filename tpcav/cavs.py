@@ -411,6 +411,7 @@ def run_tpcav(
     num_samples_for_cav=1000,
     input_window_length=1024,
     batch_size=8,
+    num_workers=0,
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
     fit_pca=True,
@@ -437,6 +438,7 @@ def run_tpcav(
             include_reverse_complement=True,
             min_samples=num_samples_for_cav,
             batch_size=batch_size,
+            num_workers=num_workers,
         )
         # use random regions as control
         builder.build_control()
