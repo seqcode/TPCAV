@@ -2,6 +2,8 @@
 
 This repository contains code to compute TPCAV (Testing with PCA projected Concept Activation Vectors) on deep learning models. TPCAV is an extension of the original TCAV method, which uses PCA to reduce the dimensionality of the activations at a selected intermediate layer before computing Concept Activation Vectors (CAVs) to improve the consistency of the results.
 
+For more technical details, please check our manuscript on Biorxiv [TPCAV: Interpreting deep learning genomics models via concept attribution](https://doi.org/10.64898/2026.01.20.700723)!
+
 ## Installation
 
 `pip install tpcav`

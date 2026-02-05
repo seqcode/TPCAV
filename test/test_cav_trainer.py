@@ -161,8 +161,8 @@ class TPCAVTest(unittest.TestCase):
     def test_all(self):
         lp = LineProfiler()
                 # Add installed-package functions you care about
-        lp.add_function(utils.insert_motif_into_seq)
-        lp.add_function(utils.sample_from_pwm)
+        lp.add_function(utils.iterate_seq_df_chunk)
+        lp.add_function(CavTrainer.train_concepts)
         lp.enable_by_count()
 
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
@@ -290,7 +290,7 @@ class TPCAVTest(unittest.TestCase):
         )
 
         lp.disable_by_count()
-        #lp.print_stats()
+        lp.print_stats()
 
 
 if __name__ == "__main__":
