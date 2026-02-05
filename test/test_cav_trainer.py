@@ -6,11 +6,12 @@ import torch
 from Bio import motifs as Bio_motifs
 from captum.attr import DeepLift
 
-from tpcav import helper, run_tpcav
+from tpcav import helper, run_tpcav, utils
 from tpcav.cavs import CavTrainer
 from tpcav.concepts import ConceptBuilder
 from tpcav.tpcav_model import TPCAV, _abs_attribution_func
 
+from line_profiler import LineProfiler
 
 class DummyModelSeq(torch.nn.Module):
     def __init__(self):
@@ -158,6 +159,11 @@ class TPCAVTest(unittest.TestCase):
 
 
     def test_all(self):
+        lp = LineProfiler()
+                # Add installed-package functions you care about
+        lp.add_function(utils.insert_motif_into_seq)
+        lp.add_function(utils.sample_from_pwm)
+        lp.enable_by_count()
 
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
         self.assertTrue(motif_path.exists(), "Motif file is missing")
@@ -282,6 +288,9 @@ class TPCAVTest(unittest.TestCase):
             torch.allclose(attributions.cpu(), attributions_old.cpu(), atol=1e-6),
             f"Attributions do not match, max difference is {torch.abs(attributions - attributions_old).max()}",
         )
+
+        lp.disable_by_count()
+        #lp.print_stats()
 
 
 if __name__ == "__main__":

@@ -458,18 +458,18 @@ class SeqChromConcept:
         yield from zip(self.seq_dl, self.chrom_dl)
 
 
-def sample_from_pwm(motif, n_seqs=1, rng=None):
+def sample_from_pwm(pwm_prob_mat, n_seqs=1, rng=None, alphabet=['A', 'C', 'G', 'T']):
     """
     Draw `n_seqs` independent sequences from a Bio.motifs.Motif PWM.
 
     Parameters
     ----------
-    motif  : Bio.motifs.Motif
-        Motif whose `.pwm` is used for sampling.
+    pwm_prob_mat  : (L, A) probability matrix
     n_seqs : int, default 1
         How many sequences to generate.
     rng    : numpy.random.Generator or None
         Leave None for np.random.default_rng().
+    alphabet  : letters to be used
 
     Returns
     -------
@@ -479,19 +479,14 @@ def sample_from_pwm(motif, n_seqs=1, rng=None):
     rng = rng or np.random.default_rng()
 
     # ---- 1. Build a (L, A) probability matrix --------------------------------
-    alphabet = list(motif.alphabet)  # e.g. ['A', 'C', 'G', 'T']
-    L = motif.length
-    pwm_dict = motif.pwm  # dict base → list(float)
-
-    # shape (L, A) with rows = positions, cols = alphabet order
-    prob_mat = np.column_stack([pwm_dict[b] for b in alphabet])
+    L = pwm_prob_mat.shape[0]
 
     # ---- 2. Vectorised multinomial sampling -----------------------------------
     # Draw U(0,1) numbers of shape (n_seqs, L)
     u = rng.random((n_seqs, L))
 
     # cumulative probabilities along alphabet axis
-    cum = np.cumsum(prob_mat, axis=1)  # still (L, A)
+    cum = np.cumsum(pwm_prob_mat, axis=1)  # still (L, A)
 
     # Broadcast cum to (n_seqs, L, A) and pick first index where cum > u
     idx = (u[..., None] < cum).argmax(axis=2)  # (n_seqs, L) int indices
@@ -504,6 +499,11 @@ def sample_from_pwm(motif, n_seqs=1, rng=None):
     seqs = ["".join(row) for row in seq_arr]
     return seqs[0] if n_seqs == 1 else seqs
 
+def get_prob_mat_from_motif(motif, alphabet=['A', 'C', 'G', 'T']):
+    pwm_dict = motif.pwm
+    pwm_prob_mat = np.column_stack([pwm_dict[b] for b in alphabet])
+    return pwm_prob_mat
+
 
 def insert_motif_into_seq(
     seq,
@@ -513,8 +513,14 @@ def insert_motif_into_seq(
     end_buffer=50,
     rng=np.random.default_rng(1),
     mode="consensus",
+    alphabet=['A', 'C', 'G', 'T']
 ):
     assert mode in ["consensus", "pwm"]
+    
+    if mode == "pwm":
+        pwm_prob_mat = get_prob_mat_from_motif(motif, alphabet)
+    else:
+        pwm_prob_mat = None
 
     seq_ins = list(deepcopy(seq))
     pos_motif_overlap = np.ones(len(seq))
@@ -531,25 +537,9 @@ def insert_motif_into_seq(
             #    f"No samples can be taken for motif {motif.name}, skip inserting the rest of motifs"
             # )
             break
-        if isinstance(motif, PairedMotif):
-            seq_ins[motif_start : (motif_start + len(motif.motif1))] = (
-                list(motif.motif1.consensus)
-                if mode == "consensus"
-                else sample_from_pwm(motif.motif1)
-            )
-            seq_ins[
-                (motif_start + len(motif.motif1) + motif.spacing) : (
-                    motif_start + len(motif)
-                )
-            ] = (
-                list(motif.motif2.consensus)
-                if mode == "consensus"
-                else sample_from_pwm(motif.motif2)
-            )
-        else:
-            seq_ins[motif_start : (motif_start + len(motif))] = (
-                list(motif.consensus) if mode == "consensus" else sample_from_pwm(motif)
-            )
+        seq_ins[motif_start : (motif_start + len(motif))] = (
+            list(motif.consensus) if mode == "consensus" else sample_from_pwm(pwm_prob_mat, rng=rng)
+        )
 
         pos_motif_overlap[(motif_start - len(motif)) : (motif_start + len(motif))] = 0
         num_insert_motifs += 1
