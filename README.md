@@ -20,6 +20,10 @@ The same framework naturally extends to other domains, such as protein structure
 
 `pip install tpcav`
 
+## Detailed Usage
+
+For detailed usage for more flexibility on defining concepts, please refer to this [jupyter notebook](https://github.com/seqcode/TPCAV/tree/main/examples/tpcav_detailed_usage.ipynb)
+
 ## Quick start
 
 > `tpcav` only works with Pytorch model, if your model is built using other libraries, you should port the model into Pytorch first. For Tensorflow models, you can use [tf2onnx](https://github.com/onnx/tensorflow-onnx) and [onnx2pytorch](https://github.com/Talmaj/onnx2pytorch) for the conversion.
@@ -89,9 +93,6 @@ bed_cav_trainer.tpcav_score_all_concepts_log_ratio(attributions)
 ```
 
 
-## Detailed Usage
-
-For detailed usage, please refer to this [jupyter notebook](https://github.com/seqcode/TPCAV/tree/main/examples/tpcav_detailed_usage.ipynb)
 
 If you find any issue, feel free to open an issue (strongly suggested) or contact [Jianyu Yang](mailto:jmy5455@psu.edu).
 
