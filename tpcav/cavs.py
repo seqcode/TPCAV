@@ -415,7 +415,7 @@ def run_tpcav(
     num_workers=0,
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
-    fit_pca=True,
+    num_pc: str|int='full',
     p=4
 ):
     """
@@ -479,12 +479,11 @@ def run_tpcav(
     # create TPCAV model on top of the given model
     tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
-    if fit_pca:
-        tpcav_model.fit_pca(
-            concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts if  bed_builder is not None else motif_concept_builders[-1].all_concepts(),
-            num_samples_per_concept=num_samples_for_pca,
-            num_pc="full",
-        )
+    tpcav_model.fit_pca(
+        concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts if  bed_builder is not None else motif_concept_builders[-1].all_concepts(),
+        num_samples_per_concept=num_samples_for_pca,
+        num_pc=num_pc,
+    )
     #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
     # create trainer for computing CAVs

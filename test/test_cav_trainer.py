@@ -118,6 +118,23 @@ class TPCAVTest(unittest.TestCase):
             output_dir="data/test_run_tpcav_output/",
         )
 
+    def test_run_tpcav_no_pca(self):
+        motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
+        genome_fasta = "data/hg38.analysisSet.fa"
+        model = DummyModelSeq()
+        layer_name = "layer1"
+
+        cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
+            model=model,
+            layer_name=layer_name,
+            meme_motif_file=str(motif_path),
+            genome_fasta=genome_fasta,
+            num_motif_insertions=[4, 8],
+            bed_seq_file="data/hg38_rmsk.head50k.bed",
+            output_dir="data/test_run_tpcav_output/",
+            num_pc=0
+        )
+
     def test_write_bw(self):
         random_regions_1 = helper.random_regions_dataframe(
             "data/hg38.analysisSet.fa.fai", 1024, 100, seed=1

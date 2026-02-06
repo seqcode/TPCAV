@@ -54,7 +54,7 @@ class TPCAV(torch.nn.Module):
         self,
         concepts: Iterable,
         num_samples_per_concept: int = 10,
-        num_pc: Optional[int] | str = None,
+        num_pc: Optional[int | str] = None,
     ) -> Dict[str, torch.Tensor]:
         """Sample activations, compute PCA, and attach buffers to the model."""
         sampled_avs = []
@@ -104,6 +104,8 @@ class TPCAV(torch.nn.Module):
         self, activations: torch.Tensor
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Project flattened activations into PCA space and residual."""
+        if not self.fitted:
+            logger.warning("PCA not fit before projecting activations, make sure this is intended")
 
         y = activations.flatten(start_dim=1).to(self.device)
         if self.Vh is not None:
