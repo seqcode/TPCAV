@@ -104,8 +104,6 @@ class TPCAV(torch.nn.Module):
         self, activations: torch.Tensor
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Project flattened activations into PCA space and residual."""
-        if not self.fitted:
-            raise RuntimeError("Call fit_pca before projecting activations.")
 
         y = activations.flatten(start_dim=1).to(self.device)
         if self.Vh is not None:
