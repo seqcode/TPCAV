@@ -400,12 +400,13 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
 
 def run_tpcav(
     model,
-    layer_name: str,
     meme_motif_file: str,
     genome_fasta: str,
     num_motif_insertions: List[int] = [4, 8, 16],
     bed_seq_file: Optional[str] = None,
     bed_chrom_file: Optional[str] = None,
+    layer_name: str | None=None,
+    layer=None,
     output_dir: str = "tpcav/",
     num_samples_for_pca=10,
     num_samples_for_cav=1000,
@@ -476,7 +477,7 @@ def run_tpcav(
         bed_builder = None
 
     # create TPCAV model on top of the given model
-    tpcav_model = TPCAV(model, layer_name=layer_name)
+    tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
     if fit_pca:
         tpcav_model.fit_pca(
