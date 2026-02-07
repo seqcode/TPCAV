@@ -5,9 +5,24 @@ This repository contains code to compute TPCAV (Testing with PCA projected Conce
 
 For more technical details, please check our manuscript on Biorxiv [TPCAV: Interpreting deep learning genomics models via concept attribution](https://doi.org/10.64898/2026.01.20.700723)!
 
+## When should I use TPCAV?
+
+TPCAV is a global feature attribution method that can be applied to any model, provided that a set of examples is available to represent the concept of interest. It is input-agnostic, meaning it can operate on raw inputs, engineered features, or **tokenized representations**, including **foundation models**.
+
+Typical concepts in Genomics include:
+- Transcription factor motifs
+- Cis-regulatory regions
+- DNA repeats
+
+The same framework naturally extends to other domains, such as protein structure prediction, transcriptomics, or any field with a well established knowledge base, by defining appropriate concept sets.
+
 ## Installation
 
 `pip install tpcav`
+
+## Detailed Usage
+
+For detailed usage for more flexibility on defining concepts, please refer to this [jupyter notebook](https://github.com/seqcode/TPCAV/tree/main/examples/tpcav_detailed_usage.ipynb)
 
 ## Quick start
 
@@ -78,9 +93,6 @@ bed_cav_trainer.tpcav_score_all_concepts_log_ratio(attributions)
 ```
 
 
-## Detailed Usage
-
-For detailed usage, please refer to this [jupyter notebook](https://github.com/seqcode/TPCAV/tree/main/examples/tpcav_detailed_usage.ipynb)
 
 If you find any issue, feel free to open an issue (strongly suggested) or contact [Jianyu Yang](mailto:jmy5455@psu.edu).
 
