@@ -53,9 +53,10 @@ class _SGDWrapper:
             n_iter_no_change=10,
             n_jobs=n_jobs,
             penalty=penalty,
+            average=True,
         )
         if penalty == "l2":
-            params = {"alpha": [1e-2, 1e-4, 1e-6]}
+            params = {"alpha": [1e-2, 1e-4, 1e-6, 1e-8]}
         elif penalty == "l1":
             params = {"alpha": [1e-1, 1]}
         else:
@@ -416,7 +417,7 @@ def run_tpcav(
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
     num_pc: str|int='full',
-    p=4
+    p=1
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -480,7 +481,7 @@ def run_tpcav(
     tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
     tpcav_model.fit_pca(
-        concepts=motif_concept_builders[-1].all_concepts() + bed_builder.concepts if  bed_builder is not None else motif_concept_builders[-1].all_concepts(),
+        concepts=motif_concept_builders[-1].concepts_for_pca() + bed_builder.concepts_for_pca() if  bed_builder is not None else motif_concept_builders[-1].concepts_for_pca(),
         num_samples_per_concept=num_samples_for_pca,
         num_pc=num_pc,
     )

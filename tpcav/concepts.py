@@ -38,7 +38,6 @@ def _construct_motif_concept_dataloader_from_control(
     genome_fasta: str,
     motifs: Sequence,
     num_motifs: int,
-    motif_mode: str,
     batch_size: int,
     num_workers: int,
     start_buffer=0,
@@ -51,7 +50,6 @@ def _construct_motif_concept_dataloader_from_control(
             control_seq_df,
             genome_fasta,
             motif=motif,
-            motif_mode=motif_mode,
             num_motifs=num_motifs,
             start_buffer=start_buffer,
             end_buffer=end_buffer,
@@ -103,6 +101,7 @@ class ConceptBuilder:
 
         self.control_regions: pd.DataFrame | None = None
         self.control_concepts: List[Concept] = []
+        self.motif_permute_concepts: List[Concept] = []
         self.concepts: List[Concept] = []
         self.metadata: Dict[str, object] = {}
         self._next_concept_id = 0
@@ -158,15 +157,15 @@ class ConceptBuilder:
             consensus = df.loc[df.motif_name == motif_name, "consensus_seq"].tolist()
             motifs = []
             for idx, cons in enumerate(consensus):
-                motif = utils.CustomMotif(f"{motif_name}_{idx}", cons)
+                motif = utils.ConsensusMotif(f"{motif_name}_{idx}", cons)
                 motifs.append(motif)
-            concept = self.build_motif_concept(motifs, motif_name, control_regions=control_regions, motif_mode="consensus")
+            concept = self.build_motif_concept(motifs, motif_name, control_regions=control_regions)
             self.concepts.append(concept)
             # build permute control if specified
             if build_permute_control:
-                motifs_permuted = [m.permute() for m in motifs]
-                concept_permuted = self.build_motif_concept(motifs_permuted, motif_name + "_perm", control_regions=control_regions, motif_mode="consensus")
-                self.control_concepts.append(concept_permuted)
+                motifs_permuted = [utils.PermutedConsensusMotif(m.name + "_perm", m.consensus) for m in motifs]
+                concept_permuted = self.build_motif_concept(motifs_permuted, motif_name + "_perm", control_regions=control_regions)
+                self.motif_permute_concepts.append(concept_permuted)
                 added.append((concept, concept_permuted))
             else:
                 added.append(concept)
@@ -180,19 +179,19 @@ class ConceptBuilder:
         with open(meme_file) as handle:
             for motif in Bio_motifs.parse(handle, fmt="MINIMAL"):
                 motif_name = utils.clean_motif_name(motif.name)
-                concept = self.build_motif_concept([motif,], motif_name, control_regions=control_regions, motif_mode="pwm")
+                concept = self.build_motif_concept([utils.BioMotifWrapped(motif),], motif_name, control_regions=control_regions)
                 self.concepts.append(concept)
                 # build permute control if specified
                 if build_permute_control:
                     motif_permuted = utils.PermutedPWMMotif(motif)
-                    concept_permuted = self.build_motif_concept([motif_permuted,], motif_name + "_perm", control_regions=control_regions, motif_mode="pwm")
-                    self.control_concepts.append(concept_permuted)
+                    concept_permuted = self.build_motif_concept([motif_permuted,], motif_name + "_perm", control_regions=control_regions)
+                    self.motif_permute_concepts.append(concept_permuted)
                     added.append((concept, concept_permuted))
                 else:
                     added.append(concept)
         return added
 
-    def build_motif_concept(self, motifs, concept_name, control_regions=None, motif_mode="pwm", start_buffer=0, end_buffer=0):
+    def build_motif_concept(self, motifs, concept_name, control_regions=None, start_buffer=0, end_buffer=0):
         if control_regions is None:
             if not self.control_concepts:
                 raise ValueError("Call build_control or pass control_regions first.")
@@ -206,7 +205,6 @@ class ConceptBuilder:
             self.genome_fasta,
             motifs=motifs,
             num_motifs=self.num_motifs,
-            motif_mode=motif_mode,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             start_buffer=start_buffer,
@@ -300,6 +298,10 @@ class ConceptBuilder:
         return added
 
     def all_concepts(self) -> List[Concept]:
+        """Return test + control + permute concepts."""
+        return [*self.concepts, *self.control_concepts, *self.motif_permute_concepts]
+
+    def concepts_for_pca(self) -> List[Concept]:
         """Return test + control concepts."""
         return [*self.concepts, *self.control_concepts]
 

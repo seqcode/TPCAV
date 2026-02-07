@@ -148,11 +148,9 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
         seq_df,
         genome_fasta,
         motif=None,
-        motif_mode="pwm",
         num_motifs=128,
         start_buffer=0,
         end_buffer=0,
-        regions_insert=None,
         return_region=False,
         print_warning=True,
         infinite=False,
@@ -160,11 +158,9 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
         self.seq_df = seq_df
         self.genome_fasta = genome_fasta
         self.motif = motif
-        self.motif_mode = motif_mode
         self.num_motifs = num_motifs
         self.start_buffer = start_buffer
         self.end_buffer = end_buffer
-        self.regions_insert = regions_insert
         self.return_region = return_region
         self.print_warning = print_warning
         self.infinite = infinite
@@ -182,11 +178,9 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
                         chunk,
                         genome=self.genome,
                         motif=self.motif,
-                        motif_mode=self.motif_mode,
                         num_motifs=self.num_motifs,
                         start_buffer=self.start_buffer,
                         end_buffer=self.end_buffer,
-                        regions_insert=self.regions_insert,
                         batch_size=None,
                         return_region=self.return_region,
                         print_warning=self.print_warning,
@@ -205,11 +199,9 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
                 chunk,
                 genome=self.genome,
                 motif=self.motif,
-                motif_mode=self.motif_mode,
                 num_motifs=self.num_motifs,
                 start_buffer=self.start_buffer,
                 end_buffer=self.end_buffer,
-                regions_insert=self.regions_insert,
                 batch_size=None,
                 return_region=self.return_region,
                 print_warning=self.print_warning,
@@ -221,11 +213,9 @@ def iterate_seq_df_chunk(
     chunk,
     genome,
     motif=None,
-    motif_mode="pwm",
     num_motifs=128,
     start_buffer=0,
     end_buffer=0,
-    regions_insert=None,
     return_region=False,
     batch_size=None,
     print_warning=True,
@@ -265,11 +255,8 @@ def iterate_seq_df_chunk(
                 num_motifs=num_motifs,
                 start_buffer=start_buffer,
                 end_buffer=end_buffer,
-                mode=motif_mode,
                 rng=rng,
             )
-        elif regions_insert is not None:
-            seq = insert_region_into_seq(seq, regions_insert, genome, rng=rng)
 
         if batch_size is None:
             if return_region:
@@ -298,10 +285,8 @@ def iterate_seq_df(
     genome_fasta,
     motif=None,
     num_motifs=128,
-    motif_mode="pwm",
     start_buffer=0,
     end_buffer=0,
-    regions_insert=None,
     batch_size=32,
     return_region=False,
     print_warning=True,
@@ -313,40 +298,9 @@ def iterate_seq_df(
         genome=genome,
         motif=motif,
         num_motifs=num_motifs,
-        motif_mode=motif_mode,
         start_buffer=start_buffer,
         end_buffer=end_buffer,
-        regions_insert=regions_insert,
         return_region=return_region,
-        batch_size=batch_size,
-        print_warning=print_warning,
-        rng=rng,
-    )
-
-
-def iterate_seq_bed(
-    seq_bed,
-    genome_fasta,
-    motif=None,
-    num_motifs=128,
-    motif_mode="pwm",
-    start_buffer=0,
-    end_buffer=0,
-    regions_insert=None,
-    batch_size=32,
-    print_warning=True,
-    rng=np.random.default_rng(1),
-):
-    seq_df = pd.read_table(seq_bed, usecols=range(3), names=["chrom", "start", "end"])
-    yield from iterate_seq_df(
-        seq_df,
-        genome_fasta,
-        motif=motif,
-        motif_mode=motif_mode,
-        num_motifs=num_motifs,
-        start_buffer=start_buffer,
-        end_buffer=end_buffer,
-        regions_insert=regions_insert,
         batch_size=batch_size,
         print_warning=print_warning,
         rng=rng,
@@ -499,8 +453,7 @@ def sample_from_pwm(pwm_prob_mat, n_seqs=1, rng=None, alphabet=['A', 'C', 'G', '
     seqs = ["".join(row) for row in seq_arr]
     return seqs[0] if n_seqs == 1 else seqs
 
-def get_prob_mat_from_motif(motif, alphabet=['A', 'C', 'G', 'T']):
-    pwm_dict = motif.pwm
+def get_prob_mat_from_motif_pwm(pwm_dict, alphabet=['A', 'C', 'G', 'T']):
     pwm_prob_mat = np.column_stack([pwm_dict[b] for b in alphabet])
     return pwm_prob_mat
 
@@ -512,16 +465,8 @@ def insert_motif_into_seq(
     start_buffer=50,
     end_buffer=50,
     rng=np.random.default_rng(1),
-    mode="consensus",
-    alphabet=['A', 'C', 'G', 'T']
 ):
-    assert mode in ["consensus", "pwm"]
     
-    if mode == "pwm":
-        pwm_prob_mat = get_prob_mat_from_motif(motif, alphabet)
-    else:
-        pwm_prob_mat = None
-
     seq_ins = list(deepcopy(seq))
     pos_motif_overlap = np.ones(len(seq))
     pos_motif_overlap[:start_buffer] = 0
@@ -537,9 +482,7 @@ def insert_motif_into_seq(
             #    f"No samples can be taken for motif {motif.name}, skip inserting the rest of motifs"
             # )
             break
-        seq_ins[motif_start : (motif_start + len(motif))] = (
-            list(motif.consensus) if mode == "consensus" else sample_from_pwm(pwm_prob_mat, rng=rng)
-        )
+        seq_ins[motif_start : (motif_start + len(motif))] = motif.sample_instance()
 
         pos_motif_overlap[(motif_start - len(motif)) : (motif_start + len(motif))] = 0
         num_insert_motifs += 1
@@ -550,51 +493,67 @@ def insert_motif_into_seq(
     return "".join(seq_ins)
 
 
-class CustomMotif:
+class ConsensusMotif:
     def __init__(self, name, consensus):
         self.name = name
         self.matrix_id = "custom"
         self.consensus = consensus.upper()
-        self.rc = False
 
     def __len__(self):
         return len(self.consensus)
-
-    def permute(self, seed=None, min_shift=0.3, name_suffix="_perm", max_attempts=100):
-        """
-        Permute the consensus sequence, return the object
-        """
-        permuted = deepcopy(self)
-
-        rng = np.random.default_rng(seed)
-        L = len(self.consensus)
-        
-        count = 0
-        while True:
-            perm = rng.permutation(L)
-            frac_moved = np.mean(perm != np.arange(L))
-            if frac_moved >= min_shift:
-                break
-            else:
-                count += 1
-            if count > max_attempts:
-                raise ValueError(
-                    f"Could not generate a permutation with min_shift={min_shift} for motif {self.name}"
-                )
-        permuted_consensus = ''.join([self.consensus[i] for i in perm])
-        permuted.consensus = permuted_consensus
-        permuted.name = self.name + name_suffix
-        permuted.matrix_id = self.name + name_suffix
-
-        return permuted
 
     def reverse_complement(self):
         self.consensus = Bio.Seq.reverse_complement(self.consensus)
         self.name = self.name + "_rc"
         return self
 
+    def sample_instance(self):
+        return self.consensus
+
+class PermutedConsensusMotif:
+    def __init__(self, name, consensus, seed=None, min_shift=0.3):
+        self.name = name
+        self.consensus = consensus.upper()
+        self.rng = np.random.RandomState(seed)
+        self.min_shift = min_shift
+
+    def __len__(self):
+        return len(self.consensus)
+
+    def reverse_complement(self):
+        self.consensus = Bio.Seq.reverse_complement(self.consensus)
+        self.name = self.name + "_rc"
+        return self
+
+    def sample_instance(self):
+        return self._permute(self.consensus)
+
+    def _permute(self, max_attempts=100):
+        """
+        Permute the consensus sequence, return the object
+        """
+        permuted = deepcopy(self)
+
+        L = len(self.consensus)
+        
+        count = 0
+        while True:
+            perm = self.rng.permutation(L)
+            frac_moved = np.mean(perm != np.arange(L))
+            if frac_moved >= self.min_shift:
+                break
+            else:
+                count += 1
+            if count > max_attempts:
+                raise ValueError(
+                    f"Could not generate a permutation with min_shift={self.min_shift} for motif {self.name}"
+                )
+        permuted_consensus = ''.join([self.consensus[i] for i in perm])
+
+        return permuted_consensus
+
 class PermutedPWMMotif:
-    BASES = ("A", "C", "G", "T")
+    BASES = ("A", "C", "G", "T") # alphabet must be symmetric!
     RC_MAP = {"A": "T", "C": "G", "G": "C", "T": "A"}
 
     def __init__(self, motif, seed=None, min_shift=0.3, name_suffix="_perm"):
@@ -607,78 +566,69 @@ class PermutedPWMMotif:
         self.name = motif.name + name_suffix if motif.name else "permuted_motif"
         self.length = motif.length
         self.alphabet = motif.alphabet
+        self.min_shift = min_shift
+        self.rng = np.random.RandomState(seed)
 
         # extract PWM as dict of lists
         pwm = {b: list(motif.pwm[b]) for b in self.BASES}
-
-        self.pwm, self.permutation = self._permute_pwm_positions(
-            pwm, seed=seed, min_shift=min_shift
-        )
+        self.pwm_prob_mat = get_prob_mat_from_motif_pwm(pwm)
 
     def __len__(self):
         return self.length
 
-    def _permute_pwm_positions(self, pwm, seed=None, min_shift=0.3):
-        rng = np.random.default_rng(seed)
-        L = len(pwm["A"])
+    def _permute_pwm_positions(self, max_attempts=100):
+        L = self.length
 
         count = 0
         while True:
-            perm = rng.permutation(L)
+            perm = self.rng.permutation(L)
             frac_moved = np.mean(perm != np.arange(L))
-            if frac_moved >= min_shift:
+            if frac_moved >= self.min_shift:
                 break
             else:
                 count += 1
-            if count > 100:
+            if count > max_attempts:
                 raise ValueError(
-                    f"Could not generate a permutation with min_shift={min_shift} for motif {self.original_motif.name}"
+                    f"Could not generate a permutation with min_shift={self.min_shift} for motif {self.original_motif.name}"
                 )
 
-        permuted_pwm = {b: [pwm[b][i] for i in perm] for b in self.BASES}
+        permuted_pwm_prob_mat = self.pwm_prob_mat[perm, :]
 
-        return permuted_pwm, perm
+        return permuted_pwm_prob_mat
 
     def reverse_complement(self):
         """
         Return a NEW PermutedMotif with reverse-complemented PWM
         """
-        rc_pwm = {b: [] for b in self.BASES}
-        L = len(self.pwm["A"])
-
-        for i in reversed(range(L)):
-            for b in self.BASES:
-                rc_base = self.RC_MAP[b]
-                rc_pwm[rc_base].append(self.pwm[b][i])
-
         rc = deepcopy(self)
-        rc.pwm = rc_pwm
+        rc.pwm_prob_mat = self.pwm_prob_mat[::-1, ::-1]
         rc.name = self.name + "_rc"
         return rc
 
+    def sample_instance(self):
+        return sample_from_pwm(self._permute_pwm_positions(), rng=self.rng)
 
-class PairedMotif:
-    def __init__(self, motif1, motif2, spacing=0):
-        self.motif1 = motif1
-        self.motif2 = motif2
-        self.rc = False
-        self.spacing = spacing
-        self.pname = f"{self.motif1.name}_and_{self.motif2.name}"
-        self.pmatrix_id = f"{self.motif1.matrix_id}_and_{self.motif2.matrix_id}"
-
-    def reverse_complement(self):
-        self.rc = True
-        self.motif1 = self.motif1.reverse_complement()
-        self.motif2 = self.motif2.reverse_complement()
-        return self
-
-    @property
-    def name(self):
-        return self.pname
-
-    @property
-    def matrix_id(self):
-        return self.pmatrix_id
+class BioMotifWrapped:
+    def __init__(self, motif, seed=None):
+        """
+        Wrapper class for Bio Motif
+        """
+        self.motif = motif
+        self.name = motif.name
+        self.length = len(motif.consensus)
+        self.pwm_prob_mat = get_prob_mat_from_motif_pwm(motif.pwm)
+        self.rng = np.random.RandomState(seed)
 
     def __len__(self):
-        return len(self.motif1) + len(self.motif2) + self.spacing
+        return self.length
+
+    def reverse_complement(self):
+        rc = deepcopy(self)
+        rc.motif = self.motif.reverse_complement()
+        rc.name = self.motif.name + "_rc"
+        rc.pwm_prob_mat = get_prob_mat_from_motif_pwm(rc.motif.pwm)
+
+        return rc
+
+    def sample_instance(self):
+        return sample_from_pwm(self.pwm_prob_mat, rng=self.rng)
