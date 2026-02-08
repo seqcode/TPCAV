@@ -243,7 +243,7 @@ class TPCAVTest(unittest.TestCase):
 
         attributions = tpcav_model.layer_attributions(
             pack_data_iters(random_regions_1), pack_data_iters(random_regions_2)
-        )["attributions"].cpu()
+        ).cpu()
 
         cav_trainer.tpcav_score("AC0001:GATA-PROP:GATA", attributions)
 
