@@ -549,18 +549,10 @@ def run_tpcav(
     motif_cav_trainers = {}
     for nm in num_motif_insertions:
         cav_trainer = CavTrainer(tpcav_model, penalty="l2")
-        for motif_concept, permuted_concept in motif_concepts_pairs[nm]:
-            # set control concept for CAV training
-            cav_trainer.set_control(
-                permuted_concept, num_samples=num_samples_for_cav
-            )
-            # train CAVs for all concepts
-            cav_trainer.train_concepts(
-                [motif_concept,],
-                num_samples_for_cav,
-                output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                num_processes=p,
-            )
+        cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
+                                         num_samples_for_cav, 
+                                         output_dir=str(output_path / f"cavs_{nm}_motifs/"),
+                                         num_processes=p)
         motif_cav_trainers[nm] = cav_trainer
     if bed_builder is not None:
         bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
