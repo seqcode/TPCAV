@@ -156,7 +156,7 @@ class TPCAV(torch.nn.Module):
         baseline_batches: Iterable,
         multiply_by_inputs: bool = True,
         abs_inputs_diff: bool = True,
-    ) -> Dict[str, torch.Tensor]:
+    ) -> torch.Tensor:
         """
         Compute DeepLift attributions on PCA embedding space.
 
@@ -223,9 +223,7 @@ class TPCAV(torch.nn.Module):
                 )
                 torch.cuda.empty_cache()
 
-        return {
-            "attributions": torch.cat(attributions),
-        }
+        return torch.cat(attributions)
 
     def input_attributions(
         self,
