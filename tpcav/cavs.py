@@ -195,6 +195,7 @@ class CavTrainer:
         output_dir: str,
         num_processes: int = 1,
     ):
+        "Train concepts with a fixed control set by self.set_control()"
         if self.control_embeddings is None:
             raise ValueError(
                 "Call set_control(control_concept, num_samples=...) before training CAVs."
@@ -239,6 +240,63 @@ class CavTrainer:
                 self.cavs_fscores[name] = fscore
                 self.cav_weights[name] = weight
                 self.cavs_list.append(weight)
+
+    def train_concepts_pairs(self,
+                             concept_pair_list,
+                             num_samples: int,
+                             output_dir: str,
+                             num_processes: int = 1):
+        """Train concept pairs (test concept, control concept)
+
+        Note: It would compute embeddings on every control concept, use self.train_concepts if control concept is fixed
+        """
+        if num_processes == 1:
+            for c_test, c_control in concept_pair_list:
+                concept_embeddings = self.tpcav.concept_embeddings(
+                    c_test, num_samples=num_samples
+                )
+                control_embeddings = self.tpcav.concept_embeddings(
+                    c_control, num_samples=num_samples
+                )
+
+                fscore, weight = _train(
+                    concept_embeddings.cpu(),
+                    control_embeddings.cpu(),
+                    Path(output_dir) / c_test.name,
+                    self.penalty,
+                )
+                self.cavs_fscores[c_test.name] = fscore
+                self.cav_weights[c_test.name] = weight
+                self.cavs_list.append(weight)
+        else:
+            pool = multiprocessing.Pool(processes=num_processes)
+            results = []
+            for c_test, c_control in concept_pair_list:
+                concept_embeddings = self.tpcav.concept_embeddings(
+                    c_test, num_samples=num_samples
+                )
+                control_embeddings = self.tpcav.concept_embeddings(
+                    c_control, num_samples=num_samples
+                )
+                res = pool.apply_async(
+                    _train,
+                    args=(
+                        concept_embeddings.cpu(),
+                        control_embeddings.cpu(),
+                        Path(output_dir) / c_test.name,
+                        self.penalty,
+                    ),
+                )
+                logger.info("Submitted CAV training for concept %s", c_test.name)
+                results.append((c_test.name, res))
+            pool.close()
+            pool.join()
+            results = [(name, res.get()) for name, res in results]
+            for name, (fscore, weight) in results:
+                self.cavs_fscores[name] = fscore
+                self.cav_weights[name] = weight
+                self.cavs_list.append(weight)
+
 
     def tpcav_score(
         self, concept_name: str, attributions: torch.Tensor

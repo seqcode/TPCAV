@@ -170,9 +170,7 @@ class TPCAVTest(unittest.TestCase):
         )
         cav_trainer = CavTrainer(tpcav_model)
 
-        for motif_concept, permute_concept in concepts_pairs:
-            cav_trainer.set_control(permute_concept, 200)
-            cav_trainer.train_concepts([motif_concept,], 200, output_dir="data/cavs_permute/", num_processes=2)
+        cav_trainer.train_concepts_pairs(concepts_pairs, 200, output_dir="data/cavs_permute/", num_processes=2)
 
 
     def test_all(self):
