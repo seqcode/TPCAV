@@ -5,10 +5,10 @@ CAV training and attribution utilities built on TPCAV.
 
 import logging
 import multiprocessing
-from collections import defaultdict
 import os
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Dict
+import time
 
 from Bio import motifs
 import matplotlib.pyplot as plt
@@ -194,12 +194,15 @@ class CavTrainer:
         num_samples: int,
         output_dir: str,
         num_processes: int = 1,
+        max_pending: int = 8
     ):
         "Train concepts with a fixed control set by self.set_control()"
         if self.control_embeddings is None:
             raise ValueError(
                 "Call set_control(control_concept, num_samples=...) before training CAVs."
             )
+        else:
+            self.control_embeddings = self.control_embeddings.cpu()
 
         if num_processes == 1:
             for c in concept_list:
@@ -222,11 +225,25 @@ class CavTrainer:
                 concept_embeddings = self.tpcav.concept_embeddings(
                     c, num_samples=num_samples
                 )
+
+                # block the process to avoid too long queue
+                while True:
+                    done = [r for (_, r) in results if r.ready()]
+                    for r in done:
+                        r.get()  # raises if worker failed
+
+                    pending = [r for (_, r) in results if not r.ready()]
+                    if len(pending) < (max_pending + num_processes):
+                        break
+
+                    time.sleep(5)
+
+
                 res = pool.apply_async(
                     _train,
                     args=(
                         concept_embeddings.cpu(),
-                        self.control_embeddings.cpu(),
+                        self.control_embeddings,
                         Path(output_dir) / c.name,
                         self.penalty,
                     ),
@@ -245,7 +262,8 @@ class CavTrainer:
                              concept_pair_list,
                              num_samples: int,
                              output_dir: str,
-                             num_processes: int = 1):
+                             num_processes: int = 1,
+                             max_pending: int = 8):
         """Train concept pairs (test concept, control concept)
 
         Note: It would compute embeddings on every control concept, use self.train_concepts if control concept is fixed
@@ -278,6 +296,19 @@ class CavTrainer:
                 control_embeddings = self.tpcav.concept_embeddings(
                     c_control, num_samples=num_samples
                 )
+
+                # block the process to avoid too long queue
+                while True:
+                    done = [r for (_, r) in results if r.ready()]
+                    for r in done:
+                        r.get()  # raises if worker failed
+
+                    pending = [r for (_, r) in results if not r.ready()]
+                    if len(pending) < (max_pending + num_processes):
+                        break
+
+                    time.sleep(5)
+
                 res = pool.apply_async(
                     _train,
                     args=(
