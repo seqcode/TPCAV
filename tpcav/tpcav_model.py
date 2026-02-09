@@ -305,7 +305,10 @@ class TPCAV(torch.nn.Module):
         Combine projected/residual embeddings into the layer activation space,
         mirroring scripts/models.py merge logic.
         """
-        y_hat = torch.matmul(avs_projected, self.Vh) + avs_residual
+        if self.Vh is not None:
+            y_hat = torch.matmul(avs_projected, self.Vh) + avs_residual
+        else:
+            y_hat = avs_residual
         y_hat = y_hat * self.zscore_std + self.zscore_mean
 
         return y_hat.reshape((-1, *self.orig_shape[1:]))
