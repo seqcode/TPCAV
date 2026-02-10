@@ -47,6 +47,38 @@ class TPCAV(torch.nn.Module):
                 "You have to specify either layer or layer_name to construct TPCAV model"
             )
 
+    def save_state(self, output_path="tpcav_state.pt"):
+        """
+        Save TPCAV model state to a file.
+        This is useful when model could not be restored by torch.save/load
+        """
+        state = {
+            "fitted": self.fitted,
+            "zscore_mean": self.zscore_mean,
+            "zscore_std": self.zscore_std,
+            "Vh": self.Vh,
+            "orig_shape": self.orig_shape
+        }
+        torch.save(state, output_path)
+    
+    @staticmethod
+    def load_state(model, layer_name=None, 
+                   layer=None, state_path: str = "tpcav_state.pt"):
+        """
+        Restore CavTrainer state from a file.
+        """
+        tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
+
+        state = torch.load(state_path, map_location="cpu")
+        tpcav_model.fitted = state["fitted"]
+        tpcav_model._set_buffer("zscore_mean", state["zscore_mean"].to(tpcav_model.device))
+        tpcav_model._set_buffer("zscore_std", state["zscore_std"].to(tpcav_model.device))
+        tpcav_model._set_buffer("Vh", state["Vh"].to(tpcav_model.device) if state["Vh"] is not None else None)
+        tpcav_model._set_buffer("orig_shape", state["orig_shape"].to(tpcav_model.device))
+
+        logger.info("Successfully restored tpcav model states!")
+        return tpcav_model
+
     def list_module_names(self) -> List[str]:
         """List all module names in the model for layer selection."""
         return [name for name, _ in self.model.named_modules()]

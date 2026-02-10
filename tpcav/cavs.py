@@ -162,22 +162,29 @@ class CavTrainer:
         Save CavTrainer state to a file.
         """
         state = {
+            "penalty": self.penalty,
             "cavs_fscores": self.cavs_fscores,
             "cav_weights": self.cav_weights,
             "control_embeddings": self.control_embeddings,
             "cavs_list": self.cavs_list,
         }
         torch.save(state, output_path)
-
-    def restore_state(self, input_path: str = "cav_trainer_state.pt"):
+    
+    @staticmethod
+    def load_state(tpcav_model: TPCAV, state_path: str = "cav_trainer_state.pt"):
         """
         Restore CavTrainer state from a file.
         """
-        state = torch.load(input_path, map_location="cpu")
-        self.cavs_fscores = state["cavs_fscores"]
-        self.cav_weights = state["cav_weights"]
-        self.control_embeddings = state["control_embeddings"]
-        self.cavs_list = state["cavs_list"]
+        state = torch.load(state_path, map_location="cpu")
+        cav_trainer = CavTrainer(tpcav_model, penalty=state["penalty"])
+
+        cav_trainer.cavs_fscores = state["cavs_fscores"]
+        cav_trainer.cav_weights = state["cav_weights"]
+        cav_trainer.control_embeddings = state["control_embeddings"]
+        cav_trainer.cavs_list = state["cavs_list"]
+
+        logger.info("Successfully restored cav trainer states!")
+        return cav_trainer
 
     def set_control(self, control_concept, num_samples: int) -> torch.Tensor:
         """
