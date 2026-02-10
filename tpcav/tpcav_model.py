@@ -26,7 +26,7 @@ class TPCAV(torch.nn.Module):
         model,
         device: Optional[str] = None,
         layer_name: Optional[str] = None,
-        layer: Optional[torch.nn.Module] = None
+        layer: Optional[torch.nn.Module] = None,
     ) -> None:
         """
         layer_name: optional module name to intercept activations via forward hook
@@ -43,8 +43,9 @@ class TPCAV(torch.nn.Module):
         elif layer_name is not None:
             self.layer = self._resolve_layer(layer_name)
         else:
-            raise Exception("You have to specify either layer or layer_name to construct TPCAV model")
-
+            raise Exception(
+                "You have to specify either layer or layer_name to construct TPCAV model"
+            )
 
     def list_module_names(self) -> List[str]:
         """List all module names in the model for layer selection."""
@@ -87,9 +88,7 @@ class TPCAV(torch.nn.Module):
 
         self._set_buffer("zscore_mean", mean.to(self.device))
         self._set_buffer("zscore_std", std.to(self.device))
-        self._set_buffer(
-            "Vh", Vh.to(self.device) if Vh is not None else None
-        )
+        self._set_buffer("Vh", Vh.to(self.device) if Vh is not None else None)
         self._set_buffer("orig_shape", torch.tensor(orig_shape).to(self.device))
         self.fitted = True
 
@@ -105,7 +104,9 @@ class TPCAV(torch.nn.Module):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Project flattened activations into PCA space and residual."""
         if not self.fitted:
-            logger.warning("PCA not fit before projecting activations, make sure this is intended")
+            logger.warning(
+                "PCA not fit before projecting activations, make sure this is intended"
+            )
 
         y = activations.flatten(start_dim=1).to(self.device)
         if self.Vh is not None:
@@ -190,7 +191,9 @@ class TPCAV(torch.nn.Module):
                         bavs_residual.to(self.device),
                         bavs_projected.to(self.device),
                     ),
-                    additional_forward_args=(inputs,),
+                    additional_forward_args=(
+                        [torch.cat([i, bi]) for i, bi in zip(inputs, binputs)],
+                    ),
                     custom_attribution_func=(
                         None if not multiply_by_inputs else custom_attr_func
                     ),
@@ -203,7 +206,7 @@ class TPCAV(torch.nn.Module):
                     baselines=(bavs_residual.to(self.device),),
                     additional_forward_args=(
                         None,
-                        inputs,
+                        [torch.cat([i, bi]) for i, bi in zip(inputs, binputs)],
                     ),
                     custom_attribution_func=(
                         None if not multiply_by_inputs else custom_attr_func
@@ -336,6 +339,7 @@ class TPCAV(torch.nn.Module):
         """
         Full forward pass with optional activation replacement and/or CAV-based gradient muting.
         """
+
         def hook_fn(_module, _inputs, output):
             y = layer_activation if layer_activation is not None else output
             if cavs_list is None or len(cavs_list) == 0:
