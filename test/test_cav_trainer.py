@@ -207,7 +207,7 @@ class TPCAVTest(unittest.TestCase):
 
         tpcav_model = TPCAV(DummyModelSeq(), layer_name="layer1").to(device)
         tpcav_model.fit_pca(
-            concepts=builder.all_concepts(),
+            concepts=builder.concepts_for_pca(),
             num_samples_per_concept=10,
             num_pc="full",
         )
@@ -247,7 +247,7 @@ class TPCAVTest(unittest.TestCase):
 
         cav_trainer.tpcav_score("AC0001:GATA-PROP:GATA", attributions)
 
-        cav_trainer.plot_cavs_similaritiy_heatmap(attributions)
+        cav_trainer.plot_cavs_similaritiy_heatmap([attributions,]*2, fscore_thresh=0.0, motif_meme_file="data/motif-clustering-v2.1beta_consensus_pwms.test.meme")
 
         input_attrs = tpcav_model.input_attributions(
             pack_data_iters(random_regions_1),
