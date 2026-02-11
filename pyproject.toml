@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tpcav"
-version = "0.4.0"
+version = "0.4.1"
 description = "Testing with PCA projected Concept Activation Vectors"
 authors = [{name = "Jianyu Yang", email = "yztxwd@gmail.com"},]
 readme = "README.md"
@@ -22,6 +22,7 @@ dependencies = [
     "biopython",
     "seaborn",
     "matplotlib",
+    "logomaker"
 ]
 license = "MIT AND (Apache-2.0 OR BSD-2-Clause)"
 keywords = ["interpretation",  "attribution", "concept", "genomics", "deep learning"]
