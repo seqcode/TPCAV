@@ -22,10 +22,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import GridSearchCV
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.linear_model import LinearRegression
+import logomaker
 
 from . import helper, utils
 from .concepts import ConceptBuilder
 from .tpcav_model import TPCAV
+from matplotlib import gridspec
 
 logger = logging.getLogger(__name__)
 
@@ -389,9 +391,10 @@ class CavTrainer:
 
     def plot_cavs_similaritiy_heatmap(
         self,
-        attributions: torch.Tensor,
+        attributions: List[torch.Tensor] | None = None,
         concept_list: List[str] | None = None,
         fscore_thresh=0.8,
+        motif_meme_file: str | None = None,
         output_path: str = "cavs_similarity_heatmap.png",
     ):
         if concept_list is None:
@@ -427,39 +430,94 @@ class CavTrainer:
             vmin=-1,
             vmax=1,
         )
-        cm.gs.update(left=0.05, right=0.5)
+        cm.gs.update(left=0, right=1)
         cm.ax_cbar.set_position([0.01, 0.9, 0.05, 0.05])
 
         cavs_names_sorted = [
             cavs_names_pass[i] for i in cm.dendrogram_col.reordered_ind
         ]
 
-        ## plot log ratio plot
-        ax_log = cm.figure.add_subplot()
         heatmap_bbox = cm.ax_heatmap.get_position()
-        ax_log.set_position([0.5, heatmap_bbox.y0, 0.2, heatmap_bbox.height])
-        # used to leave space for motif logos
-        # ax_log.tick_params(
-        #    axis="y", which="major", pad=cm.figure.get_size_inches()[0] * 0.2 * 72
-        # )
+        ax_logs = []
+        if attributions is not None:
+            for i, attrs in enumerate(attributions):
+                offset =  1 + i*0.2
+                ## plot log ratio plot
+                ax_log = cm.figure.add_subplot()
+                ax_log.set_position([offset, heatmap_bbox.y0, 0.2, heatmap_bbox.height])
 
-        log_ratios_reordered = [
-            self.tpcav_score_binary_log_ratio(cname, attributions)
-            for cname in cavs_names_sorted
-        ]
-        sns.barplot(y=cavs_names_sorted, x=log_ratios_reordered, orient="y", ax=ax_log)
-        # set color of bar by value
-        for idx in range(len((ax_log.containers[0]))):
-            if ax_log.containers[0].datavalues[idx] > 0:
-                ax_log.containers[0][idx].set_color("red")
-            else:
-                ax_log.containers[0][idx].set_color("blue")
+                log_ratios_reordered = [
+                    self.tpcav_score_binary_log_ratio(cname, attrs)
+                    for cname in cavs_names_sorted
+                ]
+                sns.barplot(y=cavs_names_sorted, x=log_ratios_reordered, orient="y", ax=ax_log)
+                # set color of bar by value
+                for idx in range(len((ax_log.containers[0]))):
+                    if ax_log.containers[0].datavalues[idx] > 0:
+                        ax_log.containers[0][idx].set_color("red")
+                    else:
+                        ax_log.containers[0][idx].set_color("blue")
 
-        ax_log.set_xlim(left=-5, right=5)
-        ax_log.yaxis.tick_right()
-        ax_log.set_title("TCAV log ratio")
+                ax_log.set_xlim(left=-5, right=5)
+                ax_log.yaxis.tick_right()
+                ax_log.set_title(f"TCAV log ratio {i}")
+                ax_log.get_yaxis().set_visible(False)
+                ax_logs.append(ax_log)
+            ax_logs[-1].get_yaxis().set_visible(True) # only show yaxis labels in the last log ratio plot
+        
+        # plot motif logo if provided meme file, try to look for pwm for every concept in the file
+        if motif_meme_file is not None:
+            ax_logs[-1].tick_params(
+               axis="y", which="major", pad=cm.figure.get_size_inches()[0] * 0.2 * 72 # leave space for motif logos
+            )
+            gs_logo = gridspec.GridSpec(len(cavs_names), 1)
+
+            logo_height = heatmap_bbox.height/len(cavs_names)
+            for i, (cav_key, g) in enumerate(zip(cavs_names_sorted[::-1], gs_logo)):
+                ax_logo = plt.subplot(g)
+                ax_logo.set_position([1+len(ax_logs)*0.2+0.01, heatmap_bbox.y0+i*logo_height, 0.2+0.01, logo_height])
+                if cav_key is not None:
+                    seq_logo(cav_key, motif_meme_file=motif_meme_file, ax=ax_logo)
+                else:
+                    ax_logo.axis('off')
 
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
+
+def seq_logo(key, motif_meme_file, ax, max_len=20):
+    "plot a pwm logo"
+    motif_pwms = motifs.parse(open(motif_meme_file), fmt='MINIMAL')
+    motif_pwms = {utils.clean_motif_name(m.name): m.pwm for m in motif_pwms} 
+    pwm = motif_pwms.get(key)
+
+    if pwm is not None:
+        pwm_df = pd.DataFrame(pwm)
+        motif_len = len(pwm_df)
+        
+        # Logomaker expects columns as A,C,G,T, so ensure correct order
+        pwm_df = pwm_df[['A', 'C', 'G', 'T']]
+    
+        # Compute information content at each position (2 - entropy)
+        def compute_ic(pwm_row):
+            entropy = -sum([p * np.log2(p) if p > 0 else 0 for p in pwm_row])
+            return 2 - entropy
+        
+        # Compute IC matrix: IC_letter = p * IC_total
+        ic_df = pwm_df.copy()
+        for i in range(len(pwm_df)):
+            ic_total = compute_ic(pwm_df.iloc[i])
+            ic_df.iloc[i] = pwm_df.iloc[i] * ic_total
+    
+        
+        # Plot with logomaker
+        x0, y0, width, height = ax.get_position().bounds
+        ax.set_position([x0, y0, width * min(1., motif_len/max_len), height])
+        logo = logomaker.Logo(ic_df, color_scheme={'A': 'red', 'C': 'blue',
+                                                  'G': 'orange', 'T': 'green'},
+                              ax=ax)
+        logo.ax.axis('off')
+    else:
+        logger.info(f'PWM not found for {key}')
+        ax.axis('off')
 
 def load_motifs_from_meme(motif_meme_file):
     return {utils.clean_motif_name(m.name): m for m in motifs.parse(open(motif_meme_file), fmt="MINIMAL")}
