@@ -572,7 +572,7 @@ def run_tpcav(
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
     num_pc: Union[str,int]='full',
-    p=1
+    p=1, max_pending_jobs=4,
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -649,7 +649,7 @@ def run_tpcav(
         cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
                                          num_samples_for_cav, 
                                          output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                         num_processes=p)
+                                         num_processes=p, max_pending=max_pending_jobs)
         motif_cav_trainers[nm] = cav_trainer
     if bed_builder is not None:
         bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
