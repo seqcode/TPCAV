@@ -155,7 +155,14 @@ class TPCAV(torch.nn.Module):
     def concept_embeddings(self, concept, num_samples: int) -> torch.Tensor:
         """Return concatenated projected + residual activations for a concept."""
         avs = self._sample_concept(concept, num_samples=num_samples)
-        residual, projected = self.project_activations(avs)
+
+        original_device = self.device
+        self.to('cpu') # move the model to cpu to avoid oom when projecting activations
+        self.device = 'cpu'
+        residual, projected = self.project_activations(avs.to('cpu'))
+        self.to(original_device)
+        self.device = original_device
+
         if projected is not None:
             return torch.cat((projected, residual), dim=1)
         return residual.detach()
