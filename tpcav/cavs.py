@@ -7,7 +7,7 @@ import logging
 import multiprocessing
 import os
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Dict
+from typing import Iterable, List, Optional, Tuple, Union
 import time
 
 from Bio import motifs
@@ -391,10 +391,10 @@ class CavTrainer:
 
     def plot_cavs_similaritiy_heatmap(
         self,
-        attributions: List[torch.Tensor] | None = None,
-        concept_list: List[str] | None = None,
+        attributions: Optional[List[torch.Tensor]] = None,
+        concept_list: Optional[List[str]] = None,
         fscore_thresh=0.8,
-        motif_meme_file: str | None = None,
+        motif_meme_file: Optional[str] = None,
         output_path: str = "cavs_similarity_heatmap.png",
     ):
         if concept_list is None:
@@ -485,44 +485,45 @@ class CavTrainer:
 
 def seq_logo(key, motif_meme_file, ax, max_len=20):
     "plot a pwm logo"
-    motif_pwms = motifs.parse(open(motif_meme_file), fmt='MINIMAL')
-    motif_pwms = {utils.clean_motif_name(m.name): m.pwm for m in motif_pwms} 
-    pwm = motif_pwms.get(key)
+    with open(motif_meme_file) as handle:
+        motif_pwms = motifs.parse(handle, fmt='MINIMAL')
+        motif_pwms = {utils.clean_motif_name(m.name): m.pwm for m in motif_pwms} 
+        pwm = motif_pwms.get(key)
 
-    if pwm is not None:
-        pwm_df = pd.DataFrame(pwm)
-        motif_len = len(pwm_df)
+        if pwm is not None:
+            pwm_df = pd.DataFrame(pwm)
+            motif_len = len(pwm_df)
+            
+            # Logomaker expects columns as A,C,G,T, so ensure correct order
+            pwm_df = pwm_df[['A', 'C', 'G', 'T']]
         
-        # Logomaker expects columns as A,C,G,T, so ensure correct order
-        pwm_df = pwm_df[['A', 'C', 'G', 'T']]
-    
-        # Compute information content at each position (2 - entropy)
-        def compute_ic(pwm_row):
-            entropy = -sum([p * np.log2(p) if p > 0 else 0 for p in pwm_row])
-            return 2 - entropy
+            # Compute information content at each position (2 - entropy)
+            def compute_ic(pwm_row):
+                entropy = -sum([p * np.log2(p) if p > 0 else 0 for p in pwm_row])
+                return 2 - entropy
+            
+            # Compute IC matrix: IC_letter = p * IC_total
+            ic_df = pwm_df.copy()
+            for i in range(len(pwm_df)):
+                ic_total = compute_ic(pwm_df.iloc[i])
+                ic_df.iloc[i] = pwm_df.iloc[i] * ic_total
         
-        # Compute IC matrix: IC_letter = p * IC_total
-        ic_df = pwm_df.copy()
-        for i in range(len(pwm_df)):
-            ic_total = compute_ic(pwm_df.iloc[i])
-            ic_df.iloc[i] = pwm_df.iloc[i] * ic_total
-    
-        
-        # Plot with logomaker
-        x0, y0, width, height = ax.get_position().bounds
-        ax.set_position([x0, y0, width * min(1., motif_len/max_len), height])
-        logo = logomaker.Logo(ic_df, color_scheme={'A': 'red', 'C': 'blue',
-                                                  'G': 'orange', 'T': 'green'},
-                              ax=ax)
-        logo.ax.axis('off')
-    else:
-        logger.info(f'PWM not found for {key}')
-        ax.axis('off')
+            
+            # Plot with logomaker
+            x0, y0, width, height = ax.get_position().bounds
+            ax.set_position([x0, y0, width * min(1., motif_len/max_len), height])
+            logo = logomaker.Logo(ic_df, color_scheme={'A': 'red', 'C': 'blue',
+                                                      'G': 'orange', 'T': 'green'},
+                                  ax=ax)
+            logo.ax.axis('off')
+        else:
+            logger.info(f'PWM not found for {key}')
+            ax.axis('off')
 
 def load_motifs_from_meme(motif_meme_file):
     return {utils.clean_motif_name(m.name): m for m in motifs.parse(open(motif_meme_file), fmt="MINIMAL")}
 
-def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List[CavTrainer], meme_motif_file: str | None = None):
+def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List[CavTrainer], meme_motif_file: Optional[str] = None):
     cavs_fscores_df = pd.DataFrame({nm: cav_trainer.cavs_fscores for nm, cav_trainer in zip(num_motif_insertions, cav_trainers)})
     cavs_fscores_df['concept'] = list(cav_trainers[0].cavs_fscores.keys())
 
@@ -560,7 +561,7 @@ def run_tpcav(
     num_motif_insertions: List[int] = [4, 8, 16],
     bed_seq_file: Optional[str] = None,
     bed_chrom_file: Optional[str] = None,
-    layer_name: str | None=None,
+    layer_name: Optional[str]=None,
     layer=None,
     output_dir: str = "tpcav/",
     num_samples_for_pca=10,
@@ -570,7 +571,7 @@ def run_tpcav(
     num_workers=0,
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
-    num_pc: str|int='full',
+    num_pc: Union[str,int]='full',
     p=1
 ):
     """

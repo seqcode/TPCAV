@@ -1,6 +1,6 @@
 import logging
 from functools import partial
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -87,7 +87,7 @@ class TPCAV(torch.nn.Module):
         self,
         concepts: Iterable,
         num_samples_per_concept: int = 10,
-        num_pc: Optional[int | str] = None,
+        num_pc: Optional[Union[int, str]] = None,
     ) -> Dict[str, torch.Tensor]:
         """Sample activations, compute PCA, and attach buffers to the model."""
         sampled_avs = []
@@ -265,7 +265,7 @@ class TPCAV(torch.nn.Module):
         target_batches: Iterable,
         baseline_batches: Iterable,
         multiply_by_inputs: bool = True,
-        cavs_list: List[torch.Tensor] | None = None,
+        cavs_list: Optional[List[torch.Tensor]] = None,
     ) -> List[torch.Tensor]:
         """Compute DeepLift attributions on PCA embedding space.
 

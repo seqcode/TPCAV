@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -99,7 +99,7 @@ class ConceptBuilder:
         self.rng_seed = rng_seed
         self.concept_name_suffix = concept_name_suffix
 
-        self.control_regions: pd.DataFrame | None = None
+        self.control_regions = None
         self.control_concepts: List[Concept] = []
         self.motif_permute_concepts: List[Concept] = []
         self.concepts: List[Concept] = []
@@ -148,7 +148,7 @@ class ConceptBuilder:
 
     def add_custom_motif_concepts(
         self, motif_table: str, control_regions: Optional[pd.DataFrame] = None, build_permute_control=True
-    ) -> List[Concept] | List[Tuple[Concept]]:
+    ) -> Union[List[Concept], List[Tuple[Concept]]]:
         """Add concepts from a tab-delimited motif table: motif_name<TAB>consensus."""
         df = pd.read_table(motif_table, names=["motif_name", "consensus_seq"])
         added = []
@@ -172,7 +172,7 @@ class ConceptBuilder:
         return added
 
     def add_meme_motif_concepts(
-        self, meme_file: str, control_regions: Optional[pd.DataFrame] = None, build_permute_control=True) -> List[Concept] | List[Tuple[Concept]]:
+        self, meme_file: str, control_regions: Optional[pd.DataFrame] = None, build_permute_control=True) -> Union[List[Concept], List[Tuple[Concept]]]:
         """Add concepts from a MEME minimal-format motif file."""
 
         added = []

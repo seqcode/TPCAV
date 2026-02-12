@@ -106,9 +106,9 @@ def bed_to_chrom_tracks_iter(
 
 def dataframe_to_chrom_tracks_iter(
     df: pd.DataFrame,
-    bigwigs: List[str] | None,
+    bigwigs: Optional[List[str]],
     batch_size: int = 1,
-) -> Iterable[torch.Tensor | None]:
+) -> Iterable[torch.Tensor]:
     """
     Yield chromatin tracks for regions from a DataFrame using bigwig files.
     """
@@ -137,7 +137,7 @@ class DataFrame2ChromTracksIterator:
     def __init__(
         self,
         df: pd.DataFrame,
-        bigwigs: List[str] | None,
+        bigwigs: Optional[List[str]],
         batch_size: int = 1,
     ):
         self.bigwigs = bigwigs
