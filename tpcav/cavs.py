@@ -634,7 +634,7 @@ def run_tpcav(
     tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
     tpcav_model.fit_pca(
-        concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + bed_builder.concepts_for_pca() if  bed_builder is not None else motif_concept_builders[-1].concepts_for_pca(),
+        concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + bed_builder.concepts_for_pca() if  bed_builder is not None else motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca(),
         num_samples_per_concept=num_samples_for_pca,
         num_pc=num_pc,
     )
