@@ -552,6 +552,7 @@ def run_tpcav(
     meme_motif_file: str,
     genome_fasta: str,
     num_motif_insertions: List[int] = [4, 8, 16],
+    motif_control_type="random",
     bed_seq_file: Optional[str] = None,
     bed_chrom_file: Optional[str] = None,
     layer_name: Optional[str]=None,
@@ -565,11 +566,14 @@ def run_tpcav(
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
     num_pc: Union[str,int]='full',
-    p=1, max_pending_jobs=4,
+    p=1, 
+    max_pending_jobs=4,
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
     """
+    assert motif_control_type in ["random", "permute"], "motif_control_type has to be one of [random, permute]!"
+
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -577,7 +581,7 @@ def run_tpcav(
     # create concept builder to generate concepts
     ## motif concepts
     motif_concepts_pairs = {}
-    motif_concept_builders = []
+    motif_concept_builders = {}
     num_motif_insertions.sort()
     for nm in num_motif_insertions:
         builder = ConceptBuilder(
@@ -593,13 +597,14 @@ def run_tpcav(
         # use random regions as control
         builder.build_control()
         # use meme motif PWMs to build motif concepts, one concept per motif
+        # each pair of concepts include the motif concept and the permuted motif concept
         concepts_pairs = builder.add_meme_motif_concepts(str(meme_motif_file))
 
         # apply transform to convert fasta sequences to one-hot encoded sequences
         builder.apply_transform(input_transform_func)
 
         motif_concepts_pairs[nm] = concepts_pairs
-        motif_concept_builders.append(builder)
+        motif_concept_builders[nm] = builder
 
     ## bed concepts (optional)
     if bed_seq_file is not None or bed_chrom_file is not None:
@@ -629,7 +634,7 @@ def run_tpcav(
     tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
     tpcav_model.fit_pca(
-        concepts=motif_concept_builders[-1].concepts_for_pca() + bed_builder.concepts_for_pca() if  bed_builder is not None else motif_concept_builders[-1].concepts_for_pca(),
+        concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + bed_builder.concepts_for_pca() if  bed_builder is not None else motif_concept_builders[-1].concepts_for_pca(),
         num_samples_per_concept=num_samples_for_pca,
         num_pc=num_pc,
     )
@@ -639,10 +644,17 @@ def run_tpcav(
     motif_cav_trainers = {}
     for nm in num_motif_insertions:
         cav_trainer = CavTrainer(tpcav_model, penalty="l2")
-        cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
-                                         num_samples_for_cav, 
-                                         output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                         num_processes=p, max_pending=max_pending_jobs)
+        if motif_control_type == 'permute':
+            cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
+                                             num_samples_for_cav, 
+                                             output_dir=str(output_path / f"cavs_{nm}_motifs/"),
+                                             num_processes=p, max_pending=max_pending_jobs)
+        else:
+            cav_trainer.set_control(motif_concept_builders[nm].control_concepts[0], num_samples=num_samples_for_cav)
+            cav_trainer.train_concepts([c for c, _ in motif_concepts_pairs[nm]],
+                                        num_samples_for_cav,
+                                        output_dir=str(output_path / f"cavs_{nm}_motifs/"),
+                                        num_processes=p, max_pending=max_pending_jobs)
         motif_cav_trainers[nm] = cav_trainer
     if bed_builder is not None:
         bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
