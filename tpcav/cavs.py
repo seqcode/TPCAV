@@ -4,12 +4,12 @@ CAV training and attribution utilities built on TPCAV.
 """
 
 import logging
-import multiprocessing
 import os
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union
 import time
 
+from concurrent.futures import ProcessPoolExecutor
 from Bio import motifs
 import matplotlib.pyplot as plt
 import numpy as np
@@ -228,40 +228,36 @@ class CavTrainer:
                 self.cav_weights[c.name] = weight
                 self.cavs_list.append(weight)
         else:
-            pool = multiprocessing.Pool(processes=num_processes)
-            results = []
-            for c in concept_list:
-                concept_embeddings = self.tpcav.concept_embeddings(
-                    c, num_samples=num_samples
-                )
+            futures = []
+            with ProcessPoolExecutor(max_workers=num_processes) as executor:
+                for c in concept_list:
+                    concept_embeddings = self.tpcav.concept_embeddings(
+                        c, num_samples=num_samples
+                    )
 
-                # block the process to avoid too long queue
-                while True:
-                    done = [r for (_, r) in results if r.ready()]
-                    for r in done:
-                        r.get()  # raises if worker failed
+                    # block the process to avoid too long queue
+                    while True:
+                        done = [f for (_, f) in futures if f.done()]
+                        for f in done:
+                            f.result()  # raises if worker failed
 
-                    pending = [r for (_, r) in results if not r.ready()]
-                    if len(pending) < (max_pending + num_processes):
-                        break
+                        pending = [f for (_, f) in futures if not f.done()]
+                        if len(pending) < (max_pending + num_processes):
+                            break
 
-                    time.sleep(5)
+                        time.sleep(5)
 
-
-                res = pool.apply_async(
-                    _train,
-                    args=(
+                    future = executor.submit(
+                        _train,
                         concept_embeddings.cpu(),
                         self.control_embeddings,
                         Path(output_dir) / c.name,
                         self.penalty,
-                    ),
-                )
-                logger.info("Submitted CAV training for concept %s", c.name)
-                results.append((c.name, res))
-            pool.close()
-            pool.join()
-            results = [(name, res.get()) for name, res in results]
+                    )
+                    logger.info("Submitted CAV training for concept %s", c.name)
+                    futures.append((c.name, future))
+
+                results = [(name, f.result()) for name, f in futures]
             for name, (fscore, weight) in results:
                 self.cavs_fscores[name] = fscore
                 self.cav_weights[name] = weight
@@ -296,42 +292,39 @@ class CavTrainer:
                 self.cav_weights[c_test.name] = weight
                 self.cavs_list.append(weight)
         else:
-            pool = multiprocessing.Pool(processes=num_processes)
-            results = []
-            for c_test, c_control in concept_pair_list:
-                concept_embeddings = self.tpcav.concept_embeddings(
-                    c_test, num_samples=num_samples
-                )
-                control_embeddings = self.tpcav.concept_embeddings(
-                    c_control, num_samples=num_samples
-                )
+            futures = []
+            with ProcessPoolExecutor(max_workers=num_processes) as executor:
+                for c_test, c_control in concept_pair_list:
+                    concept_embeddings = self.tpcav.concept_embeddings(
+                        c_test, num_samples=num_samples
+                    )
+                    control_embeddings = self.tpcav.concept_embeddings(
+                        c_control, num_samples=num_samples
+                    )
 
-                # block the process to avoid too long queue
-                while True:
-                    done = [r for (_, r) in results if r.ready()]
-                    for r in done:
-                        r.get()  # raises if worker failed
+                    # block the process to avoid too long queue
+                    while True:
+                        done = [f for (_, f) in futures if f.done()]
+                        for f in done:
+                            f.result()  # raises if worker failed
 
-                    pending = [r for (_, r) in results if not r.ready()]
-                    if len(pending) < (max_pending + num_processes):
-                        break
+                        pending = [f for (_, f) in futures if not f.done()]
+                        if len(pending) < (max_pending + num_processes):
+                            break
 
-                    time.sleep(5)
+                        time.sleep(5)
 
-                res = pool.apply_async(
-                    _train,
-                    args=(
+                    future = executor.submit(
+                        _train,
                         concept_embeddings.cpu(),
                         control_embeddings.cpu(),
                         Path(output_dir) / c_test.name,
                         self.penalty,
-                    ),
-                )
-                logger.info("Submitted CAV training for concept %s", c_test.name)
-                results.append((c_test.name, res))
-            pool.close()
-            pool.join()
-            results = [(name, res.get()) for name, res in results]
+                    )
+                    logger.info("Submitted CAV training for concept %s", c_test.name)
+                    futures.append((c_test.name, future))
+
+                results = [(name, f.result()) for name, f in futures]
             for name, (fscore, weight) in results:
                 self.cavs_fscores[name] = fscore
                 self.cav_weights[name] = weight
