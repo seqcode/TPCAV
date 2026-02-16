@@ -463,9 +463,9 @@ class CavTrainer:
             ax_logs[-1].tick_params(
                axis="y", which="major", pad=cm.figure.get_size_inches()[0] * 0.2 * 72 # leave space for motif logos
             )
-            gs_logo = gridspec.GridSpec(len(cavs_names), 1)
+            gs_logo = gridspec.GridSpec(len(cavs_names_pass), 1)
 
-            logo_height = heatmap_bbox.height/len(cavs_names)
+            logo_height = heatmap_bbox.height/len(cavs_names_pass)
             for i, (cav_key, g) in enumerate(zip(cavs_names_sorted[::-1], gs_logo)):
                 ax_logo = plt.subplot(g)
                 ax_logo.set_position([1+len(ax_logs)*0.2+0.01, heatmap_bbox.y0+i*logo_height, 0.2+0.01, logo_height])
