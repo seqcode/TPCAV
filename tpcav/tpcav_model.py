@@ -154,14 +154,7 @@ class TPCAV(torch.nn.Module):
 
     def concept_embeddings(self, concept, num_samples: int) -> torch.Tensor:
         """Return concatenated projected + residual activations for a concept."""
-        avs = self._sample_concept(concept, num_samples=num_samples)
-
-        original_device = self.device
-        self.to('cpu') # move the model to cpu to avoid oom when projecting activations
-        self.device = 'cpu'
-        residual, projected = self.project_activations(avs.to('cpu'))
-        self.to(original_device)
-        self.device = original_device
+        residual, projected = self._sample_concept_embeddings(concept, num_samples=num_samples)
 
         if projected is not None:
             return torch.cat((projected, residual), dim=1)
@@ -315,6 +308,26 @@ class TPCAV(torch.nn.Module):
         if not avs:
             raise ValueError(f"No activations gathered for concept {concept.name}")
         return torch.cat(avs)[:num_samples]
+
+    def _sample_concept_embeddings(self, concept, num_samples: int) -> List[Union[torch.Tensor, None]]:
+        num = 0
+        residuals = []; projected = []
+        for inputs in concept.data_iter:
+            av = self._layer_output(*[i.to(self.device) for i in inputs]).detach()
+            r, p = self.project_activations(av)
+            residuals.append(r.cpu())
+            if p is not None:
+                projected.append(p.cpu())
+            else:
+                projected.append(p)
+            num += av.shape[0]
+            if num >= num_samples:
+                break
+        if not residuals:
+            raise ValueError(f"No activations gathered for concept {concept.name}")
+        residuals = torch.cat(residuals)
+        projected = torch.cat(projected) if p is not None else None
+        return residuals, projected
 
     def _layer_output(self, *inputs: Tuple[torch.Tensor]) -> torch.Tensor:
         """Return activations from the configured layer or model hook."""
