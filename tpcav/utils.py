@@ -503,9 +503,10 @@ class ConsensusMotif:
         return len(self.consensus)
 
     def reverse_complement(self):
-        self.consensus = Bio.Seq.reverse_complement(self.consensus)
-        self.name = self.name + "_rc"
-        return self
+        rc = deepcopy(self)
+        rc.consensus = Bio.Seq.reverse_complement(self.consensus)
+        rc.name = self.name + "_rc"
+        return rc
 
     def sample_instance(self):
         return self.consensus
@@ -521,9 +522,10 @@ class PermutedConsensusMotif:
         return len(self.consensus)
 
     def reverse_complement(self):
-        self.consensus = Bio.Seq.reverse_complement(self.consensus)
-        self.name = self.name + "_rc"
-        return self
+        rc = deepcopy(self)
+        rc.consensus = Bio.Seq.reverse_complement(self.consensus)
+        rc.name = self.name + "_rc"
+        return rc
 
     def sample_instance(self):
         return self._permute(self.consensus)

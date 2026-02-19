@@ -516,7 +516,22 @@ def seq_logo(key, motif_meme_file, ax, max_len=20):
 def load_motifs_from_meme(motif_meme_file):
     return {utils.clean_motif_name(m.name): m for m in motifs.parse(open(motif_meme_file), fmt="MINIMAL")}
 
-def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List[CavTrainer], meme_motif_file: Optional[str] = None, regres_on: List[str]=['motif_len', 'information_content', 'information_content_GC']):
+def load_motifs_from_custom_motif(motif_file):
+    df = pd.read_table(motif_file, names=["motif_name", "consensus_seq"])
+    motifs_dict = {}
+    for motif_name in np.unique(df.motif_name):
+        motif_name = utils.clean_motif_name(motif_name)
+        consensus = [s.upper() for s in df.loc[df.motif_name == motif_name, "consensus_seq"].tolist()]
+        motifs_dict[motif_name] = consensus
+
+    return motifs_dict
+
+
+def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List[CavTrainer], motif_file: Optional[str] = None,
+                             motif_file_fmt: str = 'meme'):
+    
+    assert motif_file_fmt in ['meme', 'consensus']
+
     cavs_fscores_df = pd.DataFrame({nm: cav_trainer.cavs_fscores for nm, cav_trainer in zip(num_motif_insertions, cav_trainers)})
     cavs_fscores_df['concept'] = list(cav_trainers[0].cavs_fscores.keys())
 
@@ -529,19 +544,36 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
     cavs_fscores_df["AUC_fscores"] = cavs_fscores_df.apply(compute_auc_fscore, axis=1)
 
     # if motif instances are provided, fit linear regression curve to remove the dependency of f-scores on information content and motif lengthj
-    if meme_motif_file is not None:
-        motifs_dict = load_motifs_from_meme(meme_motif_file)
-        def load_motif_info(key):
-            m = motifs_dict[key]
-            return (len(m.consensus), m.relative_entropy.sum(), np.dot(np.array(m.pwm['G']) + np.array(m.pwm['C']), m.relative_entropy))
-        cavs_fscores_df[['motif_len', 'information_content', 'information_content_GC']] = cavs_fscores_df.apply(lambda x: load_motif_info(x['concept']), axis=1, result_type='expand')
-        
-        model = LinearRegression()
-        model.fit(cavs_fscores_df[regres_on].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
-        
-        y_pred = model.predict(cavs_fscores_df[regres_on].to_numpy())
-        residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
-        cavs_fscores_df['AUC_fscores_residual'] = residuals
+    if motif_file is not None:
+        if motif_file_fmt == 'meme':
+            motifs_dict = load_motifs_from_meme(motif_file)
+            def load_meme_motif_info(key):
+                m = motifs_dict[key]
+                return (len(m.consensus), m.relative_entropy.sum(), np.dot(np.array(m.pwm['G']) + np.array(m.pwm['C']), m.relative_entropy))
+            cavs_fscores_df[['motif_len', 'information_content', 'information_content_GC']] = cavs_fscores_df.apply(lambda x: load_meme_motif_info(x['concept']), axis=1, result_type='expand')
+            
+            model = LinearRegression()
+            model.fit(cavs_fscores_df[['motif_len', 'information_content', 'information_content_GC']].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
+            
+            y_pred = model.predict(cavs_fscores_df[['motif_len', 'information_content', 'information_content_GC']].to_numpy())
+            residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
+            cavs_fscores_df['AUC_fscores_residual'] = residuals
+        else:
+            motifs_dict = load_motifs_from_custom_motif(motif_file)
+            def load_custom_motif_info(key):
+                consensus_seqs = motifs_dict[key]
+                avg_len = np.mean([len(s) for s in consensus_seqs])
+                avg_gc = np.mean([s.count('G') + s.count('C') for s in consensus_seqs])
+                return (avg_len, avg_gc)
+
+            cavs_fscores_df[['avg_len', 'avg_gc']] = cavs_fscores_df.apply(lambda x: load_custom_motif_info(x['concept']), axis=1, result_type='expand')
+            
+            model = LinearRegression()
+            model.fit(cavs_fscores_df[['avg_len', 'avg_gc']].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
+            
+            y_pred = model.predict(cavs_fscores_df[['avg_len', 'avg_gc']].to_numpy())
+            residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
+            cavs_fscores_df['AUC_fscores_residual'] = residuals
 
         cavs_fscores_df.sort_values("AUC_fscores_residual", ascending=False, inplace=True)
     else:
@@ -551,8 +583,9 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
 
 def run_tpcav(
     model,
-    meme_motif_file: str,
+    motif_file: str,
     genome_fasta: str,
+    motif_file_fmt: str = 'meme',
     num_motif_insertions: List[int] = [4, 8, 16],
     motif_control_type="random",
     bed_seq_file: Optional[str] = None,
@@ -575,6 +608,7 @@ def run_tpcav(
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
     """
     assert motif_control_type in ["random", "permute"], "motif_control_type has to be one of [random, permute]!"
+    assert motif_file_fmt in ['meme', 'consensus'], "motif_file_fmt has to be one of [meme, consensus]!"
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -598,9 +632,13 @@ def run_tpcav(
         )
         # use random regions as control
         builder.build_control()
-        # use meme motif PWMs to build motif concepts, one concept per motif
-        # each pair of concepts include the motif concept and the permuted motif concept
-        concepts_pairs = builder.add_meme_motif_concepts(str(meme_motif_file))
+
+        if motif_file_fmt == 'meme':
+            # use meme motif PWMs to build motif concepts, one concept per motif
+            # each pair of concepts include the motif concept and the permuted motif concept
+            concepts_pairs = builder.add_meme_motif_concepts(str(motif_file))
+        else:
+            concepts_pairs = builder.add_custom_motif_concepts(str(motif_file))
 
         # apply transform to convert fasta sequences to one-hot encoded sequences
         builder.apply_transform(input_transform_func)
@@ -673,7 +711,7 @@ def run_tpcav(
         bed_cav_trainer = None
 
     if len(num_motif_insertions) > 1:
-        cavs_fscores_df = compute_motif_auc_fscore(num_motif_insertions, list(motif_cav_trainers.values()), meme_motif_file=meme_motif_file)
+        cavs_fscores_df = compute_motif_auc_fscore(num_motif_insertions, list(motif_cav_trainers.values()), motif_file=motif_file, motif_file_fmt=motif_file_fmt)
     else:
         cavs_fscores_df = None
 
