@@ -111,10 +111,26 @@ class TPCAVTest(unittest.TestCase):
         cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
             model=model,
             layer_name=layer_name,
-            meme_motif_file=str(motif_path),
+            motif_file=str(motif_path),
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
             bed_seq_file="data/hg38_rmsk.head50k.bed",
+            output_dir="data/test_run_tpcav_output/",
+        )
+
+    def test_run_tpcav_consensus_random_control(self):
+        motif_path = Path("data") / "custom_motifs_alan.tsv"
+        genome_fasta = "data/hg38.analysisSet.fa"
+        model = DummyModelSeq()
+        layer_name = "layer1"
+
+        cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
+            model=model,
+            layer_name=layer_name,
+            motif_file=str(motif_path),
+            motif_file_fmt='consensus',
+            genome_fasta=genome_fasta,
+            num_motif_insertions=[4, 8],
             output_dir="data/test_run_tpcav_output/",
         )
 
@@ -127,7 +143,7 @@ class TPCAVTest(unittest.TestCase):
         cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
             model=model,
             layer_name=layer_name,
-            meme_motif_file=str(motif_path),
+            motif_file=str(motif_path),
             motif_control_type='permute',
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
@@ -144,7 +160,7 @@ class TPCAVTest(unittest.TestCase):
         cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
             model=model,
             layer_name=layer_name,
-            meme_motif_file=str(motif_path),
+            motif_file=str(motif_path),
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
             bed_seq_file="data/hg38_rmsk.head50k.bed",
