@@ -553,9 +553,9 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
             cavs_fscores_df[['motif_len', 'information_content', 'information_content_GC']] = cavs_fscores_df.apply(lambda x: load_meme_motif_info(x['concept']), axis=1, result_type='expand')
             
             model = LinearRegression()
-            model.fit(cavs_fscores_df[['motif_len', 'information_content', 'information_content_GC']].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
+            model.fit(cavs_fscores_df[['information_content_GC',]].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
             
-            y_pred = model.predict(cavs_fscores_df[['motif_len', 'information_content', 'information_content_GC']].to_numpy())
+            y_pred = model.predict(cavs_fscores_df[['information_content_GC',]].to_numpy())
             residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
             cavs_fscores_df['AUC_fscores_residual'] = residuals
         else:
