@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tpcav"
-version = "0.6.0"
+version = "0.6.1"
 description = "Testing with PCA projected Concept Activation Vectors"
 authors = [{name = "Jianyu Yang", email = "yztxwd@gmail.com"},]
 readme = "README.md"
