@@ -154,7 +154,7 @@ class CavTrainer:
     def __init__(self, tpcav: TPCAV, penalty: str = "l2") -> None:
         self.tpcav = tpcav
         self.penalty = penalty
-        self.cavs_fscores = {}
+        self.cav_fscores = {}
         self.cav_weights = {}
         self.control_embeddings: Optional[torch.Tensor] = None
         self.cavs_list: List[torch.Tensor] = []
@@ -165,7 +165,7 @@ class CavTrainer:
         """
         state = {
             "penalty": self.penalty,
-            "cavs_fscores": self.cavs_fscores,
+            "cav_fscores": self.cav_fscores,
             "cav_weights": self.cav_weights,
             "control_embeddings": self.control_embeddings,
             "cavs_list": self.cavs_list,
@@ -180,7 +180,7 @@ class CavTrainer:
         state = torch.load(state_path, map_location="cpu")
         cav_trainer = CavTrainer(tpcav_model, penalty=state["penalty"])
 
-        cav_trainer.cavs_fscores = state["cavs_fscores"]
+        cav_trainer.cav_fscores = state["cav_fscores"]
         cav_trainer.cav_weights = state["cav_weights"]
         cav_trainer.control_embeddings = state["control_embeddings"]
         cav_trainer.cavs_list = state["cavs_list"]
@@ -224,7 +224,7 @@ class CavTrainer:
                     Path(output_dir) / c.name,
                     self.penalty,
                 )
-                self.cavs_fscores[c.name] = fscore
+                self.cav_fscores[c.name] = fscore
                 self.cav_weights[c.name] = weight
                 self.cavs_list.append(weight)
         else:
@@ -259,7 +259,7 @@ class CavTrainer:
 
                 results = [(name, f.result()) for name, f in futures]
             for name, (fscore, weight) in results:
-                self.cavs_fscores[name] = fscore
+                self.cav_fscores[name] = fscore
                 self.cav_weights[name] = weight
                 self.cavs_list.append(weight)
 
@@ -288,7 +288,7 @@ class CavTrainer:
                     Path(output_dir) / c_test.name,
                     self.penalty,
                 )
-                self.cavs_fscores[c_test.name] = fscore
+                self.cav_fscores[c_test.name] = fscore
                 self.cav_weights[c_test.name] = weight
                 self.cavs_list.append(weight)
         else:
@@ -326,7 +326,7 @@ class CavTrainer:
 
                 results = [(name, f.result()) for name, f in futures]
             for name, (fscore, weight) in results:
-                self.cavs_fscores[name] = fscore
+                self.cav_fscores[name] = fscore
                 self.cav_weights[name] = weight
                 self.cavs_list.append(weight)
 
@@ -397,14 +397,14 @@ class CavTrainer:
         cavs_pass = []
         cavs_names_pass = []
         for cname in cavs_names:
-            if self.cavs_fscores[cname] >= fscore_thresh:
+            if self.cav_fscores[cname] >= fscore_thresh:
                 cavs_pass.append(self.cav_weights[cname].cpu().numpy())
                 cavs_names_pass.append(cname)
             else:
                 logger.info(
                     "Skipping CAV %s with F-score %.3f below threshold %.3f",
                     cname,
-                    self.cavs_fscores[cname],
+                    self.cav_fscores[cname],
                     fscore_thresh,
                 )
         if len(cavs_pass) == 0:
@@ -533,8 +533,8 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
     
     assert motif_file_fmt in ['meme', 'consensus']
 
-    cavs_fscores_df = pd.DataFrame({nm: cav_trainer.cavs_fscores for nm, cav_trainer in zip(num_motif_insertions, cav_trainers)})
-    cavs_fscores_df['concept'] = list(cav_trainers[0].cavs_fscores.keys())
+    cavs_fscores_df = pd.DataFrame({nm: cav_trainer.cav_fscores for nm, cav_trainer in zip(num_motif_insertions, cav_trainers)})
+    cavs_fscores_df['concept'] = list(cav_trainers[0].cav_fscores.keys())
 
     def compute_auc_fscore(row):
         y = [row[nm] for nm in num_motif_insertions]
