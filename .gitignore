@@ -11,3 +11,6 @@
 !pyproject.toml
 !LICENSE
 !README.md
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
