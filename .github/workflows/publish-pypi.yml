@@ -9,8 +9,6 @@ jobs:
   build:
     name: Build distributions
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -21,6 +19,9 @@ jobs:
 
       - name: Install build tools
         run: python -m pip install --upgrade pip build twine
+
+      - name: Install project dependencies
+        run: python -m pip install .
 
       - name: Read package version
         id: version
@@ -57,6 +58,9 @@ jobs:
 
       - name: Build sdist and wheel
         run: python -m build --sdist --wheel --outdir dist/
+
+      - name: Python compile check
+        run: python -m py_compile tpcav/*.py scripts/*.py test/*.py
 
       - name: Twine check
         run: python -m twine check --strict dist/*
