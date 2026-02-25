@@ -384,7 +384,7 @@ class CavTrainer:
 
     def plot_cavs_similaritiy_heatmap(
         self,
-        attributions: Optional[List[torch.Tensor]] = None,
+        attributions: Optional[Union[List[torch.Tensor], torch.Tensor]] = None,
         concept_list: Optional[List[str]] = None,
         fscore_thresh=0.8,
         motif_meme_file: Optional[str] = None,
@@ -433,6 +433,7 @@ class CavTrainer:
         heatmap_bbox = cm.ax_heatmap.get_position()
         ax_logs = []
         if attributions is not None:
+            attributions = attributions if isinstance(attributions, List) else [attributions, ]
             for i, attrs in enumerate(attributions):
                 offset =  1 + i*0.2
                 ## plot log ratio plot
