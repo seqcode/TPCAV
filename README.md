@@ -93,7 +93,36 @@ attributions = tpcav_model.layer_attributions(pack_data_iters(random_regions_1),
 bed_cav_trainer.tpcav_score_all_concepts_log_ratio(attributions)
 ```
 
+## Output
 
+The results of TPCAV are stored in `CavTrainer` object, it contains the F-score of each concept, the corresponding concept activation vector (CAV), and the model object decorated by TPCAV parameters & functions, given the example in Quick Usage:
+
+```python
+cav_trainer = motif_cav_trainers[0] # here we take the first motif cav trainer that correponds to the first number of motif insertions
+# retrieve F-scores
+motif_cav_trainers[0].cav_fscores
+# retrieve CAVs
+motif_cav_trainers[0].cav_weights
+```
+
+You can also retrieve the model decorated by TPCAV parameters by
+
+```python
+tpcav_mode = cav_trainer.tpcav
+```
+
+So that you can compute attributions for new inputs
+
+```python
+# compute layer attributions, and compute new tpcav score
+attrs = tpcav_model.layer_attributions(target_batches, baseline_batches)
+cav_trainer.tpcav_score_all_concepts_log_ratio(attrs)
+
+# input attributions
+input_attrs = tpcav_model.input_attributions(target_batches, baseline_batches, multiply_by_inputs=True,)
+# or concept specific input attributions (parts explained by the provided concepts CAVs)
+input_attrs = tpcav_model.input_attributions(target_batches, baseline_batches, multiply_by_inputs=True, cavs_list=[cav_trainer.cav_weights[concept_name])
+```
 
 If you find any issue, feel free to open an issue (strongly suggested) or contact [Jianyu Yang](mailto:jmy5455@psu.edu).
 
