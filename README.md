@@ -72,7 +72,8 @@ concept_fscores_dataframe, motif_cav_trainers, bed_cav_trainer = run_tpcav(
     num_motif_insertions=[4, 8],
     bed_seq_file=bed_seq_concept, 
     output_dir="test_run_tpcav_output/",
-    input_transform_func=transform_fasta_to_one_hot_seq)
+    input_transform_func=transform_fasta_to_one_hot_seq,
+    p=4) # number of concurrent SGDClassifier can be run at the same time, increase it if you have available CPU power, it speeds up training significantly
 
 #==================== Compuate layer attributions of target testing regions ================================
 # retrieve the tpcav model
@@ -91,6 +92,10 @@ attributions = tpcav_model.layer_attributions(pack_data_iters(random_regions_1),
 # compute TPCAV scores for the concept
 # here uses bed_cav_trainer that contains the concepts provided from bed file
 bed_cav_trainer.tpcav_score_all_concepts_log_ratio(attributions)
+
+# save the trainers for future use
+torch.save(motif_cav_trainers, "motif_cav_trainers.pt")
+torch.save(bed_cav_trainer, "bed_cav_trainer.pt")
 ```
 
 ## Output
