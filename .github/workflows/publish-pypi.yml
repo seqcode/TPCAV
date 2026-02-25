@@ -30,7 +30,7 @@ jobs:
           import os
           import pathlib
           import tomllib
-          version = tomllib.loads(pathlib.Path("pyproject.toml").read_bytes())["project"][
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"][
               "version"
           ]
           print(version)
@@ -50,7 +50,7 @@ jobs:
             tag = tag[1:]
           # `steps.version.outputs.version` is available via GHA expressions only, so re-read here.
           import pathlib, tomllib
-          version = tomllib.loads(pathlib.Path("pyproject.toml").read_bytes())["project"]["version"]
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"]
           if tag != version:
             raise SystemExit(f"Release tag ({tag}) does not match pyproject.toml version ({version})")
           print("Tag matches version:", tag)
