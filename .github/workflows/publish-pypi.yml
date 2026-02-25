@@ -76,6 +76,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    environment:
+      name: pypi
+      url: https://pypi.org/project/tpcav/
     permissions:
       id-token: write
       contents: read
