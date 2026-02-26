@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
+from scipy import stats
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics.pairwise import cosine_similarity
@@ -527,9 +528,14 @@ def load_motifs_from_custom_motif(motif_file):
 
     return motifs_dict
 
+def plot_reg(data, x, y, ax=None):
+    ax = sns.regplot(data=data, x=x, y=y, ax=ax)
+    res = stats.linregress(data[x], data[y])
+    ax.text(0.05, 0.9, f"R^2: {res.rvalue**2:.4f}\nP value:  {res.pvalue}", transform=ax.transAxes)
+    return res
 
 def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List[CavTrainer], motif_file: Optional[str] = None,
-                             motif_file_fmt: str = 'meme'):
+                             motif_file_fmt: str = 'meme', figure_path: Optional[str]=None):
     
     assert motif_file_fmt in ['meme', 'consensus']
 
@@ -544,7 +550,8 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
 
     cavs_fscores_df["AUC_fscores"] = cavs_fscores_df.apply(compute_auc_fscore, axis=1)
 
-    # if motif instances are provided, fit linear regression curve to remove the dependency of f-scores on information content and motif lengthj
+    # if motif instances are provided, fit linear regression curve to remove the dependency of f-scores on either information_content_GC or motif length and motif gc
+    fig, axes = plt.subplots(nrows=1, ncols=3, sharey=True, figsize=(15, 4))
     if motif_file is not None:
         if motif_file_fmt == 'meme':
             motifs_dict = load_motifs_from_meme(motif_file)
@@ -559,6 +566,9 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
             y_pred = model.predict(cavs_fscores_df[['information_content_GC',]].to_numpy())
             residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
             cavs_fscores_df['AUC_fscores_residual'] = residuals
+            plot_reg(data=cavs_fscores_df, x='information_content_GC', y='AUC_fscores', ax=axes[0])
+            plot_reg(data=cavs_fscores_df, x='information_content', y='AUC_fscores', ax=axes[1])
+            plot_reg(data=cavs_fscores_df, x='motif_len', y='AUC_fscores', ax=axes[2])
         else:
             motifs_dict = load_motifs_from_custom_motif(motif_file)
             def load_custom_motif_info(key):
@@ -570,15 +580,21 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
             cavs_fscores_df[['avg_len', 'avg_gc']] = cavs_fscores_df.apply(lambda x: load_custom_motif_info(x['concept']), axis=1, result_type='expand')
             
             model = LinearRegression()
-            model.fit(cavs_fscores_df[['avg_len', 'avg_gc']].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
+            model.fit(cavs_fscores_df[['avg_gc',]].to_numpy(), cavs_fscores_df['AUC_fscores'].to_numpy()[:, np.newaxis])
             
-            y_pred = model.predict(cavs_fscores_df[['avg_len', 'avg_gc']].to_numpy())
+            y_pred = model.predict(cavs_fscores_df[['avg_gc',]].to_numpy())
             residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
             cavs_fscores_df['AUC_fscores_residual'] = residuals
+            plot_reg(data=cavs_fscores_df, x='avg_len', y='AUC_fscores', ax=axes[0])
+            plot_reg(data=cavs_fscores_df, x='avg_gc', y='AUC_fscores', ax=axes[1])
+            axes[2].set_axis('off')
 
         cavs_fscores_df.sort_values("AUC_fscores_residual", ascending=False, inplace=True)
     else:
         cavs_fscores_df.sort_values("AUC_fscores", ascending=False, inplace=True)
+    
+    if figure_path is not None:
+        plt.savefig(figure_path, dpi=300, bbox_inches='tight')
 
     return cavs_fscores_df
 
