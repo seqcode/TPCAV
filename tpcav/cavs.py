@@ -419,7 +419,7 @@ class CavTrainer:
         cm = sns.clustermap(
             matrix_similarity,
             xticklabels=False,
-            yticklabels=False,
+            yticklabels=False if attributions is not None else cavs_names_pass,
             cmap="bwr",
             vmin=-1,
             vmax=1,
@@ -462,15 +462,20 @@ class CavTrainer:
         
         # plot motif logo if provided meme file, try to look for pwm for every concept in the file
         if motif_meme_file is not None:
-            ax_logs[-1].tick_params(
-               axis="y", which="major", pad=cm.figure.get_size_inches()[0] * 0.2 * 72 # leave space for motif logos
-            )
+            if attributions is not None:
+                ax_logs[-1].tick_params(
+                   axis="y", which="major", pad=cm.figure.get_size_inches()[0] * 0.3 * 72 # leave space for motif logos
+                )
+            else:
+                cm.ax_heatmap.tick_params(
+                   axis="y", which="major", pad=cm.figure.get_size_inches()[0] * 0.3 * 72 # leave space for motif logos
+                )
             gs_logo = gridspec.GridSpec(len(cavs_names_pass), 1)
 
             logo_height = heatmap_bbox.height/len(cavs_names_pass)
             for i, (cav_key, g) in enumerate(zip(cavs_names_sorted[::-1], gs_logo)):
                 ax_logo = plt.subplot(g)
-                ax_logo.set_position([1+len(ax_logs)*0.2+0.01, heatmap_bbox.y0+i*logo_height, 0.2+0.01, logo_height])
+                ax_logo.set_position([1+len(ax_logs)*0.2+0.01, heatmap_bbox.y0+i*logo_height, 0.3+0.01, logo_height])
                 if cav_key is not None:
                     seq_logo(cav_key, motif_meme_file=motif_meme_file, ax=ax_logo)
                 else:

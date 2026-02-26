@@ -6,7 +6,7 @@ import torch
 from Bio import motifs as Bio_motifs
 from captum.attr import DeepLift
 
-from tpcav import helper, run_tpcav, utils
+from tpcav import helper, run_tpcav, utils, report
 from tpcav.cavs import CavTrainer
 from tpcav.concepts import ConceptBuilder
 from tpcav.tpcav_model import TPCAV, _abs_attribution_func
@@ -117,6 +117,10 @@ class TPCAVTest(unittest.TestCase):
             bed_seq_file="data/hg38_rmsk.head50k.bed",
             output_dir="data/test_run_tpcav_output/",
         )
+
+        report.generate_tcav_html_report("data/test_html.html", motif_cav_trainers,
+                                         extra_cav_trainers = {'repeats': bed_cav_trainer},
+                                         motif_file=motif_path, fscore_thresh=0.1)
 
     def test_run_tpcav_consensus_random_control(self):
         motif_path = Path("data") / "custom_motifs_alan.tsv"
