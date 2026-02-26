@@ -535,7 +535,7 @@ def plot_reg(data, x, y, ax=None):
     return res
 
 def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List[CavTrainer], motif_file: Optional[str] = None,
-                             motif_file_fmt: str = 'meme', figure_path: Optional[str]=None):
+                             motif_file_fmt: str = 'meme', output_path: Optional[str]=None):
     
     assert motif_file_fmt in ['meme', 'consensus']
 
@@ -593,8 +593,8 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
     else:
         cavs_fscores_df.sort_values("AUC_fscores", ascending=False, inplace=True)
     
-    if figure_path is not None:
-        plt.savefig(figure_path, dpi=300, bbox_inches='tight')
+    if output_path is not None:
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
 
     return cavs_fscores_df
 
