@@ -98,11 +98,15 @@ torch.save(motif_cav_trainers, "motif_cav_trainers.pt")
 torch.save(bed_cav_trainer, "bed_cav_trainer.pt")
 ```
 
-## Output
+There will be a `report.html` file generated in the output folder for quick inspection of the results
+
+
+## Follow-up analysis
 
 The results of TPCAV are stored in `CavTrainer` object, it contains the F-score of each concept, the corresponding concept activation vector (CAV), and the model object decorated by TPCAV parameters & functions, given the example in Quick Usage:
 
 ```python
+motif_cav_trainers = torch.load("motif_cav_trainers.pt")
 cav_trainer = motif_cav_trainers[0] # here we take the first motif cav trainer that correponds to the first number of motif insertions
 # retrieve F-scores
 motif_cav_trainers[0].cav_fscores
@@ -122,7 +126,21 @@ So that you can compute attributions for new inputs
 # compute layer attributions, and compute new tpcav score
 attrs = tpcav_model.layer_attributions(target_batches, baseline_batches)
 cav_trainer.tpcav_score_all_concepts_log_ratio(attrs)
+```
 
+Then you can generate new reports using the computed attributions
+
+```python
+report.generate_tcav_html_report("report.html", motif_cav_trainers,
+                                 non_motif_cav_trainers = {'repeats': bed_cav_trainer},
+                                 motif_file=motif_path, motif_file_fmt='meme',
+                                 fscore_thresh=0.8)
+
+```
+
+You can also extract concept specific attribution score by providing a list of cavs
+
+```python
 # input attributions
 input_attrs = tpcav_model.input_attributions(target_batches, baseline_batches, multiply_by_inputs=True,)
 # or concept specific input attributions (parts explained by the provided concepts CAVs)

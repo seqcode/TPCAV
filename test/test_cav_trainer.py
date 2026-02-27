@@ -142,8 +142,8 @@ class TPCAVTest(unittest.TestCase):
             pack_data_iters(random_regions_1), pack_data_iters(random_regions_2)
         ).cpu()
 
-        report.generate_tcav_html_report("data/test_html.html", motif_cav_trainers,
-                                         extra_cav_trainers = {'repeats': bed_cav_trainer},
+        report.generate_tpcav_html_report("data/test_html.html", motif_cav_trainers,
+                                         non_motif_cav_trainers = {'repeats': bed_cav_trainer},
                                          attributions = [attributions, ] * 3,
                                          motif_file=motif_path, fscore_thresh=0.1)
 

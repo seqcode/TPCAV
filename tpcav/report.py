@@ -93,6 +93,7 @@ def _maybe_build_motif_logo_data_uris(
 def generate_tpcav_html_report(
     output_html_path: Union[str, Path],
     motif_cav_trainers: Optional[Mapping[Union[int, str], Any]] = None,
+    non_motif_cav_trainers: Optional[Mapping[str, Any]] = None,
     extra_cav_trainers: Optional[Mapping[str, Any]] = None,
     attributions: Optional[Union[Any, list[Any]]] = None,
     motif_file: Optional[Union[str, Path]] = None,
@@ -108,7 +109,8 @@ def generate_tpcav_html_report(
     Args:
         output_html_path: Path to write the HTML report.
         motif_cav_trainers: Dict mapping "# motif insertions" -> CavTrainer.
-        extra_cav_trainers: Optional dict mapping a display name -> CavTrainer.
+        non_motif_cav_trainers: Optional dict mapping a display name -> CavTrainer.
+        extra_cav_trainers: Deprecated alias for non_motif_cav_trainers.
         attributions: Optional attribution tensor (or list of tensors) shared across all heatmaps (enables log-ratio barplots).
         motif_file: Motif file path passed through to compute/plot helpers when relevant.
         motif_file_fmt: 'meme' or 'consensus' (used by compute_motif_auc_fscore).
@@ -121,7 +123,12 @@ def generate_tpcav_html_report(
     assets_dir.mkdir(parents=True, exist_ok=True)
 
     motif_cav_trainers = dict(motif_cav_trainers or {})
+    non_motif_cav_trainers = dict(non_motif_cav_trainers or {})
     extra_cav_trainers = dict(extra_cav_trainers or {})
+    if non_motif_cav_trainers and extra_cav_trainers:
+        raise ValueError("Provide only one of `non_motif_cav_trainers` or `extra_cav_trainers`.")
+    if extra_cav_trainers and not non_motif_cav_trainers:
+        non_motif_cav_trainers = extra_cav_trainers
 
     now = _dt.datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
 
@@ -167,7 +174,7 @@ def generate_tpcav_html_report(
     # 1) Gather CavTrainers
     # -----------------------------------------------------------------------------
     all_trainers: dict[str, Any] = {f"motifs_{k}": v for k, v in motif_cav_trainers.items()}
-    all_trainers.update(extra_cav_trainers)
+    all_trainers.update(non_motif_cav_trainers)
 
     motif_rank: dict[str, int] = {c: i + 1 for i, c in enumerate(ranked_motif_concepts)}
     motif_concept_set = set(ranked_motif_concepts)
@@ -198,7 +205,7 @@ def generate_tpcav_html_report(
 
     # Track all non-motif concepts (concept, source).
     extra_concepts: list[tuple[str, str, float]] = []
-    for trainer_name, trainer in extra_cav_trainers.items():
+    for trainer_name, trainer in non_motif_cav_trainers.items():
         cav_fscores = getattr(trainer, "cav_fscores", None)
         if not isinstance(cav_fscores, dict):
             continue
@@ -281,7 +288,7 @@ def generate_tpcav_html_report(
             # fill non-motif trainer (disambiguate duplicates)
             label_counts: dict[str, int] = {}
             for concept, source_name, fs in selected_extra_concepts:
-                src_trainer = extra_cav_trainers.get(source_name)
+                src_trainer = non_motif_cav_trainers.get(source_name)
                 if src_trainer is None:
                     continue
                 if concept not in getattr(src_trainer, "cav_weights", {}):
