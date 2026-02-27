@@ -651,6 +651,7 @@ def run_tpcav(
     save_cav_trainer=True,
     generate_html_report=True,
     html_report_fscore_thresh=0.9,
+    seed=1001,
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -677,6 +678,7 @@ def run_tpcav(
             min_samples=num_samples_for_cav,
             batch_size=batch_size,
             num_workers=num_workers,
+            rng_seed = seed,
         )
         # use random regions as control
         builder.build_control()
@@ -704,6 +706,7 @@ def run_tpcav(
             include_reverse_complement=True,
             min_samples=num_samples_for_cav,
             batch_size=batch_size,
+            rng_seed = seed,
         )
         # use random regions as control
         bed_builder.build_control()
