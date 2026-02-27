@@ -160,8 +160,8 @@ Check `report_tpcav_score.html` for Log TPCAV score of each concept.
 ## HTML output
 
 An example report can be found [here](https://github.com/seqcode/TPCAV/blob/main/data/report_tpcav_score.html.zip?raw=true). The HTML output contains three sections in general:
-1. Tables listing F-scores of all concepts:
-2. Motif concept ranking
+1. Tables listing F-scores of all concepts, for motif concepts there are F-scores at different number of insertions.
+2. Motif concept ranking by AUC F-scores or corrected AUC F-scores (motif concept sensitivity)
 3. Concept activaton vectors (CAVs) similarity matrix heatmap and TPCAV score
 
 
