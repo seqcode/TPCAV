@@ -100,7 +100,7 @@ def transform_fasta_to_one_hot_seq(seq, chrom):
 
 #==================== Construct concepts ================================
 motif_path = "data/motif-clustering-v2.1beta_consensus_pwms.test.meme" # motif file in meme format for constructing motif concepts
-bed_seq_concept = "data/hg38_rmsk.head500k.bed" # a bed file to supply concepts described by a set of regions, format [chrom, start, end, label, concept_name]
+bed_seq_concept = "data/hg38_rmsk.head50k.bed" # a bed file to supply concepts described by a set of regions, format [chrom, start, end, label, concept_name]
 genome_fasta = "data/hg38.analysisSet.fa"
 model = torch.load("data/mcf7_ctcf_best.pt", map_location=device, weights_only=False) # load the model
 layer_name = "linear_layer_1"   # name of the layer to be interpreted, you should be able to retrieve the layer object by getattr(model, layer_name)
