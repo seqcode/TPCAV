@@ -593,7 +593,7 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
             
             y_pred = model.predict(cavs_fscores_df[['information_content_GC',]].to_numpy())
             residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
-            cavs_fscores_df['AUC_fscores_residual'] = residuals
+            cavs_fscores_df['Motif_concept_sensitivity_score (AUC_fscores_residual)'] = residuals
             plot_reg(data=cavs_fscores_df, x='information_content_GC', y='AUC_fscores', ax=axes[0])
             plot_reg(data=cavs_fscores_df, x='information_content', y='AUC_fscores', ax=axes[1])
             plot_reg(data=cavs_fscores_df, x='motif_len', y='AUC_fscores', ax=axes[2])
@@ -612,12 +612,12 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
             
             y_pred = model.predict(cavs_fscores_df[['avg_gc',]].to_numpy())
             residuals = cavs_fscores_df['AUC_fscores'].to_numpy() - y_pred.flatten()
-            cavs_fscores_df['AUC_fscores_residual'] = residuals
+            cavs_fscores_df['Motif_concept_sensitivity_score (AUC_fscores_residual)'] = residuals
             plot_reg(data=cavs_fscores_df, x='avg_len', y='AUC_fscores', ax=axes[0])
             plot_reg(data=cavs_fscores_df, x='avg_gc', y='AUC_fscores', ax=axes[1])
             axes[2].axis('off')
 
-        cavs_fscores_df.sort_values("AUC_fscores_residual", ascending=False, inplace=True)
+        cavs_fscores_df.sort_values("Motif_concept_sensitivity_score (AUC_fscores_residual)", ascending=False, inplace=True)
     else:
         cavs_fscores_df.sort_values("AUC_fscores", ascending=False, inplace=True)
     

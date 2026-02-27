@@ -200,7 +200,7 @@ def generate_tpcav_html_report(
             for nm in motif_insertions:
                 out[f"fscore_{nm}"] = row.get(nm)
             out["AUC_fscores"] = row.get("AUC_fscores")
-            out["AUC_fscores_residual"] = row.get("AUC_fscores_residual")
+            out["Motif_concept_sensitivity_score (AUC_fscores_residual)"] = row.get("Motif_concept_sensitivity_score (AUC_fscores_residual)")
             concept_rows.append(out)
 
     # Track all non-motif concepts (concept, source).
@@ -481,7 +481,7 @@ def generate_tpcav_html_report(
         motif_cols = (
             ["rank", "concept"]
             + [f"fscore_{nm}" for nm in motif_insertions]
-            + ["AUC_fscores", "AUC_fscores_residual", "source"]
+            + ["AUC_fscores", "Motif_concept_sensitivity_score (AUC_fscores_residual)", "source"]
         )
         extra_cols = ["concept", "source", "fscore"]
 
