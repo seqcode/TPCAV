@@ -1,5 +1,7 @@
 *
 !data/motif-clustering-v2.1beta_consensus_pwms.meme
+!data/hg38_rmsk.sample.bed
+!data/mcf7_ctcf_best.pt
 !tpcav/
 !tpcav/*.py
 !scripts/
