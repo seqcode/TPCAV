@@ -100,7 +100,7 @@ def generate_tpcav_html_report(
     fscore_thresh: float = 0.8,
     top_motif_concepts: int = 10,
     title: str = "TPCAV report",
-    embed_images: bool = True,
+    embed_images: bool = False,
 ) -> Path:
     """
     Generate a standalone HTML report from CavTrainer objects.
@@ -435,6 +435,14 @@ def generate_tpcav_html_report(
             f"<div class='muted'>Images are stored in: {_html.escape(str(assets_dir))}</div>"
         )
 
+    param_rows = [
+        ("fscore_thresh", str(fscore_thresh)),
+        ("top_motif_concepts", str(top_motif_concepts)),
+        ("motif_file", str(motif_file) if motif_file is not None else ""),
+        ("motif_file_fmt", str(motif_file_fmt)),
+    ]
+    params_html = _render_kv_table(param_rows)
+
     all_concepts: list[str] = []
     seen = set()
     for c in ranked_motif_concepts:
@@ -739,12 +747,13 @@ def generate_tpcav_html_report(
   </style>
 </head>
 <body>
-	  <div class="container">
-	    <header>
-	      <h1>{_html.escape(title)}</h1>
-	      <div class="meta">Generated: {now}</div>
-	      {assets_note}
-	    </header>
+		  <div class="container">
+		    <header>
+		      <h1>{_html.escape(title)}</h1>
+		      <div class="meta">Generated: {now}</div>
+		      {params_html}
+		      {assets_note}
+		    </header>
 
 			    <section>
 			      <h2>Concepts</h2>

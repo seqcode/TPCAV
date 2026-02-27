@@ -25,7 +25,7 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.linear_model import LinearRegression
 import logomaker
 
-from . import helper, utils
+from . import helper, utils, report
 from .concepts import ConceptBuilder
 from .tpcav_model import TPCAV
 from matplotlib import gridspec
@@ -615,7 +615,7 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
             cavs_fscores_df['AUC_fscores_residual'] = residuals
             plot_reg(data=cavs_fscores_df, x='avg_len', y='AUC_fscores', ax=axes[0])
             plot_reg(data=cavs_fscores_df, x='avg_gc', y='AUC_fscores', ax=axes[1])
-            axes[2].set_axis('off')
+            axes[2].axis('off')
 
         cavs_fscores_df.sort_values("AUC_fscores_residual", ascending=False, inplace=True)
     else:
@@ -648,7 +648,9 @@ def run_tpcav(
     num_pc: Union[str,int]='full',
     p=1, 
     max_pending_jobs=4,
-    save_cav_trainer=True
+    save_cav_trainer=True,
+    generate_html_report=True,
+    html_report_fscore_thresh=0.9,
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -764,5 +766,10 @@ def run_tpcav(
         cavs_fscores_df = compute_motif_auc_fscore(num_motif_insertions, list(motif_cav_trainers.values()), motif_file=motif_file, motif_file_fmt=motif_file_fmt)
     else:
         cavs_fscores_df = None
+
+    if generate_html_report:
+        report.generate_tcav_html_report(str(output_path / f"report.html"), motif_cav_trainers,
+                                         extra_cav_trainers = {'bed concepts': bed_cav_trainer},
+                                         motif_file=motif_file, motif_file_fmt=motif_file_fmt, fscore_thresh=html_report_fscore_thresh)
 
     return cavs_fscores_df, motif_cav_trainers, bed_cav_trainer
