@@ -20,17 +20,44 @@ The same framework naturally extends to other domains, such as protein structure
 
 `pip install tpcav`
 
+## Inputs
+
+- For motif concepts, please provide motifs in either of the two formats:
+    - Candidate motif PWMs in MEME MINIMAL format, motif database used in our manuscript is from [Jeff Viestra Lab](https://resources.altius.org/~jvierstra/projects/motif-clustering-v2.1beta/)
+    - A tab delimited file with consensus motif information, you can provide multiple consensus sequences for a single motif:
+      ```text
+      <motif_name>    <consensus_seq>
+      motif1    ATATAAAA
+      motif2    AACGGGCA
+      motif2    ATTCCCAA
+      ...
+      ```
+
+- For concepts provided in genomic coordinates, please provide them as bed file in the following way, repeats coordinates in the manuscript are downloaded from [RepeatMasker database](https://www.repeatmasker.org/):
+    ```text
+    <chrom>  <start> <end>    <strand>    <concept name>  
+    chr1	16363	16459	-	DNA/hAT-Charlie_Charlie15a
+    chr1	16713	16744	+	Simple_repeat_(TGG)n
+    chr1	18907	19048	+	LINE/L2_L2a
+    ...
+    ```
+
+- Additional required inputs:
+    - Genome fasta file
+    - Model in Pytorch
+
+> `tpcav` only works with Pytorch model, if your model is built using other libraries, you should port the model into Pytorch first. For Tensorflow models, you can use [tf2onnx](https://github.com/onnx/tensorflow-onnx) and [onnx2pytorch](https://github.com/Talmaj/onnx2pytorch) for the conversion.
+
 ## Detailed Usage
 
 For detailed usage for more flexibility on defining concepts, please refer to this [jupyter notebook](https://github.com/seqcode/TPCAV/tree/main/examples/tpcav_detailed_usage.ipynb)
 
 ## Quick start
 
-> `tpcav` only works with Pytorch model, if your model is built using other libraries, you should port the model into Pytorch first. For Tensorflow models, you can use [tf2onnx](https://github.com/onnx/tensorflow-onnx) and [onnx2pytorch](https://github.com/Talmaj/onnx2pytorch) for the conversion.
 
 ```python
 import torch
-from tpcav import run_tpcav
+from tpcav import run_tpcav, helper
 
 #==================== Prepare Model and Data transform function ================================
 class DummyModelSeq(torch.nn.Module):
@@ -74,6 +101,12 @@ concept_fscores_dataframe, motif_cav_trainers, bed_cav_trainer = run_tpcav(
     output_dir="test_run_tpcav_output/",
     input_transform_func=transform_fasta_to_one_hot_seq,
     p=4) # number of concurrent SGDClassifier can be run at the same time, increase it if you have available CPU power, it speeds up training significantly
+```
+
+There will be a `report.html` file generated in the output folder for quick inspection of the results
+
+```python
+from tpcav import report
 
 #==================== Compuate layer attributions of target testing regions ================================
 # retrieve the tpcav model
@@ -82,31 +115,48 @@ tpcav_model = bed_cav_trainer.tpcav
 # create input regions and baseline regions for attribution
 random_regions_1 = helper.random_regions_dataframe(genome_fasta + ".fai", 1024, 100, seed=1)
 random_regions_2 = helper.random_regions_dataframe(genome_fasta + ".fai", 1024, 100, seed=2)
+
 # create iterators to yield one-hot encoded sequences from the region dataframes
+# adjust this funtion to fit your model input format requirements
 def pack_data_iters(df):
     seq_fasta_iter = helper.dataframe_to_fasta_iter(df, genome_fasta, batch_size=8)
     seq_one_hot_iter = (helper.fasta_to_one_hot_sequences(seq_fasta) for seq_fasta in seq_fasta_iter)
     return zip(seq_one_hot_iter, )
+
 # compute layer attributions given the iterators of testing regions and control regions
 attributions = tpcav_model.layer_attributions(pack_data_iters(random_regions_1), pack_data_iters(random_regions_2))["attributions"]
-# compute TPCAV scores for the concept
-# here uses bed_cav_trainer that contains the concepts provided from bed file
-bed_cav_trainer.tpcav_score_all_concepts_log_ratio(attributions)
+
+# generate a new html report with TPCAV score computed
+report.generate_tpcav_html_report("report_tpcav_score.html", motif_cav_trainers,
+                               non_motif_cav_trainers = {'repeats': bed_cav_trainer},
+                               attributions = [attributions, ],  # if you have multiple sets of attributions you can provide a list
+                               motif_file=motif_path, motif_file_fmt='meme', fscore_thresh=0.8)
 
 # save the trainers for future use
 torch.save(motif_cav_trainers, "motif_cav_trainers.pt")
 torch.save(bed_cav_trainer, "bed_cav_trainer.pt")
 ```
 
-There will be a `report.html` file generated in the output folder for quick inspection of the results
+Check `report_tpcav_score.html` for Log TPCAV score of each concept.
+
+## HTML output
+
+The HTML output contains three sections roughly:
+1. Tables listing F-scores of all concepts:
+2. Motif concept ranking
+3. Concept activaton vectors (CAVs) similarity matrix heatmap and TPCAV score
 
 
-## Follow-up analysis
+## Restore trained concepts
 
 The results of TPCAV are stored in `CavTrainer` object, it contains the F-score of each concept, the corresponding concept activation vector (CAV), and the model object decorated by TPCAV parameters & functions, given the example in Quick Usage:
 
 ```python
+# reload trainers back
 motif_cav_trainers = torch.load("motif_cav_trainers.pt")
+bed_cav_trainer = torch.load("bed_cav_trainer.pt")
+
+# inspect trainer properties
 cav_trainer = motif_cav_trainers[0] # here we take the first motif cav trainer that correponds to the first number of motif insertions
 # retrieve F-scores
 motif_cav_trainers[0].cav_fscores
@@ -128,7 +178,7 @@ attrs = tpcav_model.layer_attributions(target_batches, baseline_batches)
 cav_trainer.tpcav_score_all_concepts_log_ratio(attrs)
 ```
 
-Then you can generate new reports using the computed attributions
+You can also generate new reports using the computed attributions
 
 ```python
 report.generate_tcav_html_report("report.html", motif_cav_trainers,
