@@ -147,5 +147,5 @@ input_attrs = tpcav_model.input_attributions(target_batches, baseline_batches, m
 input_attrs = tpcav_model.input_attributions(target_batches, baseline_batches, multiply_by_inputs=True, cavs_list=[cav_trainer.cav_weights[concept_name])
 ```
 
-If you find any issue, feel free to open an issue (strongly suggested) or contact [Jianyu Yang](mailto:jmy5455@psu.edu).
+If you find any issue, feel free to open an issue (strongly suggested) or contact [Jianyu Yang](mailto:yztxwd@gmail.com).
 
