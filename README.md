@@ -54,22 +54,40 @@ For detailed usage for more flexibility on defining concepts, please refer to th
 
 ## Quick start
 
+Example usage on a simple model trained for predicting CTCF binding in MCF-7 cell line
 
 ```python
 import torch
 from tpcav import run_tpcav, helper
+device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
 #==================== Prepare Model and Data transform function ================================
 class DummyModelSeq(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.layer1 = torch.nn.Linear(1024, 1)
-        self.layer2 = torch.nn.Linear(4, 1)
+        self.conv_layer_1 = torch.nn.Sequential(
+            torch.nn.Conv1d(4, 64, 25, padding=12, bias=True),
+            torch.nn.BatchNorm1d(64),
+            torch.nn.LeakyReLU()
+        )
+        self.conv_layer_2 = torch.nn.Sequential(
+            torch.nn.Conv1d(64, 128, 3, padding=1, stride=2, bias=True),
+            torch.nn.BatchNorm1d(128),
+            torch.nn.LeakyReLU(),
+        )
+
+        self.linear_layer_1 = torch.nn.Sequential(
+            torch.nn.Linear(512, 1),
+            torch.nn.LeakyReLU()
+        )
+        self.linear_layer_2 = torch.nn.Linear(128, 1)
 
     def forward(self, seq):
-        y_hat = self.layer1(seq)
+        y_hat = self.conv_layer_1(seq)
+        y_hat = self.conv_layer_2(y_hat)
+        y_hat = self.linear_layer_1(y_hat)
         y_hat = y_hat.squeeze(-1)
-        y_hat = self.layer2(y_hat)
+        y_hat = self.linear_layer_2(y_hat)
         return y_hat
 
 # By default, every concept extracts fasta sequences and bigwig signals from the given region
@@ -84,7 +102,7 @@ def transform_fasta_to_one_hot_seq(seq, chrom):
 motif_path = "data/motif-clustering-v2.1beta_consensus_pwms.test.meme" # motif file in meme format for constructing motif concepts
 bed_seq_concept = "data/hg38_rmsk.head500k.bed" # a bed file to supply concepts described by a set of regions, format [chrom, start, end, label, concept_name]
 genome_fasta = "data/hg38.analysisSet.fa"
-model = DummyModelSeq() # load the model
+model = torch.load("data/mcf7_ctcf_best.pt", map_location=device, weights_only=False) # load the model
 layer_name = "layer1"   # name of the layer to be interpreted, you should be able to retrieve the layer object by getattr(model, layer_name)
 
 # concept_fscores_dataframe: fscores of each concept
@@ -96,7 +114,7 @@ concept_fscores_dataframe, motif_cav_trainers, bed_cav_trainer = run_tpcav(
     motif_file=motif_path,
     motif_file_fmt='meme',  # specify your motif file format, either meme or consensus (tab delimited file in form [motif_name, consensus_sequence])
     genome_fasta=genome_fasta,
-    num_motif_insertions=[4, 8],
+    num_motif_insertions=[12, 24, 36],
     bed_seq_file=bed_seq_concept, 
     output_dir="test_run_tpcav_output/",
     input_transform_func=transform_fasta_to_one_hot_seq,
@@ -113,8 +131,8 @@ from tpcav import report
 tpcav_model = bed_cav_trainer.tpcav
 
 # create input regions and baseline regions for attribution
-random_regions_1 = helper.random_regions_dataframe(genome_fasta + ".fai", 1024, 100, seed=1)
-random_regions_2 = helper.random_regions_dataframe(genome_fasta + ".fai", 1024, 100, seed=2)
+ctcf_peaks = helper.load_bed_and_center("data/MCF-7_CTCF_ENCFF942TCG.bed", window=1024).sample(n=100)
+random_regions = helper.random_regions_dataframe(genome_fasta + ".fai", 1024, 100, seed=2)
 
 # create iterators to yield one-hot encoded sequences from the region dataframes
 # adjust this funtion to fit your model input format requirements
@@ -124,7 +142,7 @@ def pack_data_iters(df):
     return zip(seq_one_hot_iter, )
 
 # compute layer attributions given the iterators of testing regions and control regions
-attributions = tpcav_model.layer_attributions(pack_data_iters(random_regions_1), pack_data_iters(random_regions_2))["attributions"]
+attributions = tpcav_model.layer_attributions(pack_data_iters(ctcf_peaks), pack_data_iters(random_regions))
 
 # generate a new html report with TPCAV score computed
 report.generate_tpcav_html_report("report_tpcav_score.html", motif_cav_trainers,
