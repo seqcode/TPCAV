@@ -54,7 +54,7 @@ For detailed usage for more flexibility on defining concepts, please refer to th
 
 ## Quick start
 
-Example usage on a simple model trained for predicting CTCF binding in MCF-7 cell line
+Example usage on a simple model trained for predicting CTCF binding in MCF-7 cell line, you would need to download [hg38 genome](https://hgdownload.gi.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz) to run, other used files can be found in `data/` directory
 
 ```python
 import torch
