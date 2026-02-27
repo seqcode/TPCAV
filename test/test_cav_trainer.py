@@ -118,8 +118,33 @@ class TPCAVTest(unittest.TestCase):
             output_dir="data/test_run_tpcav_output/",
         )
 
+        random_regions_1 = helper.random_regions_dataframe(
+            "data/hg38.analysisSet.fa.fai", 1024, 100, seed=1
+        )
+        random_regions_2 = helper.random_regions_dataframe(
+            "data/hg38.analysisSet.fa.fai", 1024, 100, seed=2
+        )
+
+        def pack_data_iters(df):
+            seq_fasta_iter = helper.dataframe_to_fasta_iter(
+                df, "data/hg38.analysisSet.fa", batch_size=8
+            )
+            seq_one_hot_iter = (
+                helper.fasta_to_one_hot_sequences(seq_fasta)
+                for seq_fasta in seq_fasta_iter
+            )
+            chrom_iter = helper.dataframe_to_chrom_tracks_iter(df, None, batch_size=8)
+            return zip(
+                seq_one_hot_iter,
+            )
+
+        attributions = bed_cav_trainer.tpcav.layer_attributions(
+            pack_data_iters(random_regions_1), pack_data_iters(random_regions_2)
+        ).cpu()
+
         report.generate_tcav_html_report("data/test_html.html", motif_cav_trainers,
                                          extra_cav_trainers = {'repeats': bed_cav_trainer},
+                                         attributions = [attributions, ] * 3,
                                          motif_file=motif_path, fscore_thresh=0.1)
 
     def test_run_tpcav_consensus_random_control(self):

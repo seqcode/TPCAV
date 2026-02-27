@@ -433,8 +433,16 @@ class CavTrainer:
 
         heatmap_bbox = cm.ax_heatmap.get_position()
         ax_logs = []
+        log_ratios_by_attr = None
         if attributions is not None:
-            attributions = attributions if isinstance(attributions, List) else [attributions, ]
+            log_ratios_by_attr = {}
+            attributions = (
+                attributions
+                if isinstance(attributions, (list, tuple))
+                else [
+                    attributions,
+                ]
+            )
             for i, attrs in enumerate(attributions):
                 offset =  1 + i*0.2
                 ## plot log ratio plot
@@ -445,6 +453,7 @@ class CavTrainer:
                     self.tpcav_score_binary_log_ratio(cname, attrs)
                     for cname in cavs_names_sorted
                 ]
+                log_ratios_by_attr[i] = log_ratios_reordered
                 sns.barplot(y=cavs_names_sorted, x=log_ratios_reordered, orient="y", ax=ax_log)
                 # set color of bar by value
                 for idx in range(len((ax_log.containers[0]))):
@@ -482,6 +491,20 @@ class CavTrainer:
                     ax_logo.axis('off')
 
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
+        row_reordered_ind = list(cm.dendrogram_row.reordered_ind)
+        col_reordered_ind = list(cm.dendrogram_col.reordered_ind)
+        matrix_similarity_sorted = matrix_similarity[np.ix_(row_reordered_ind, col_reordered_ind)]
+        return {
+            "concept_names": cavs_names_pass,
+            "matrix_similarity": matrix_similarity,
+            "row_reordered_ind": row_reordered_ind,
+            "col_reordered_ind": col_reordered_ind,
+            "concept_names_sorted_rows": cavs_names_sorted,
+            "concept_names_sorted_cols": cavs_names_sorted,
+            "matrix_similarity_sorted": matrix_similarity_sorted,
+            "log_ratios_by_attr": log_ratios_by_attr,
+            "output_path": str(output_path),
+        }
 
 def seq_logo(key, motif_meme_file, ax, max_len=20):
     "plot a pwm logo"
