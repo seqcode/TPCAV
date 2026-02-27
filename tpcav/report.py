@@ -421,9 +421,10 @@ def generate_tpcav_html_report(
     if motif_auc_plot_exists:
         if embed_images:
             motif_src = _read_as_data_uri(motif_auc_plot_path)
+            motif_auc_fig_html = f"<img class='figure' src='{motif_src}' alt='Motif AUC regression'/>"
         else:
             motif_src = _html.escape(motif_auc_plot_path.name)
-        motif_auc_fig_html = f"<img class='figure' src='{motif_src}' alt='Motif AUC regression'/>"
+            motif_auc_fig_html = ""
     elif motif_cav_trainers:
         motif_auc_fig_html = "<div class='warn'>Motif AUC regression plot not generated.</div>"
     else:
@@ -967,7 +968,7 @@ def generate_tpcav_html_report(
 	          plot_bgcolor: "rgba(0,0,0,0)",
 	          font: {{color: "#e7ecff"}},
 	          margin: {{l: 50, r: 20, t: 40, b: 60}},
-	          title: "Motif AUC regression (JS)",
+	          title: "Motif AUC regression",
 	        }};
 
 	        available.forEach(([xcol, ycol], idx) => {{

@@ -114,7 +114,7 @@ class TPCAVTest(unittest.TestCase):
             motif_file=str(motif_path),
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
-            bed_seq_file="data/hg38_rmsk.head50k.bed",
+            bed_seq_file="data/hg38_rmsk.sample.bed",
             output_dir="data/test_run_tpcav_output/",
         )
 
@@ -176,7 +176,7 @@ class TPCAVTest(unittest.TestCase):
             motif_control_type='permute',
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
-            bed_seq_file="data/hg38_rmsk.head50k.bed",
+            bed_seq_file="data/hg38_rmsk.sample.bed",
             output_dir="data/test_run_tpcav_output/",
         )
 
@@ -192,7 +192,7 @@ class TPCAVTest(unittest.TestCase):
             motif_file=str(motif_path),
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
-            bed_seq_file="data/hg38_rmsk.head50k.bed",
+            bed_seq_file="data/hg38_rmsk.sample.bed",
             output_dir="data/test_run_tpcav_output/",
             num_pc=0
         )
