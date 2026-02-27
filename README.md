@@ -103,7 +103,7 @@ motif_path = "data/motif-clustering-v2.1beta_consensus_pwms.test.meme" # motif f
 bed_seq_concept = "data/hg38_rmsk.head500k.bed" # a bed file to supply concepts described by a set of regions, format [chrom, start, end, label, concept_name]
 genome_fasta = "data/hg38.analysisSet.fa"
 model = torch.load("data/mcf7_ctcf_best.pt", map_location=device, weights_only=False) # load the model
-layer_name = "layer1"   # name of the layer to be interpreted, you should be able to retrieve the layer object by getattr(model, layer_name)
+layer_name = "linear_layer_1"   # name of the layer to be interpreted, you should be able to retrieve the layer object by getattr(model, layer_name)
 
 # concept_fscores_dataframe: fscores of each concept
 # motif_cav_trainers: each trainer contains the cav weights of motifs inserted different number of times
