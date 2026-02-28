@@ -199,7 +199,7 @@ cav_trainer.tpcav_score_all_concepts_log_ratio(attrs)
 You can also generate new reports using the computed attributions
 
 ```python
-report.generate_tcav_html_report("report.html", motif_cav_trainers,
+report.generate_tpcav_html_report("report.html", motif_cav_trainers,
                                  non_motif_cav_trainers = {'repeats': bed_cav_trainer},
                                  motif_file=motif_path, motif_file_fmt='meme',
                                  fscore_thresh=0.8)
