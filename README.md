@@ -22,29 +22,30 @@ The same framework naturally extends to other domains, such as protein structure
 
 ## Inputs
 
-- For motif concepts, please provide motifs in either of the two formats:
-    - Candidate motif PWMs in MEME MINIMAL format, motif database used in our manuscript is from [Jeff Viestra Lab](https://resources.altius.org/~jvierstra/projects/motif-clustering-v2.1beta/)
-    - A tab delimited file with consensus motif information, you can provide multiple consensus sequences for a single motif:
-      ```text
-      <motif_name>    <consensus_seq>
-      motif1    ATATAAAA
-      motif2    AACGGGCA
-      motif2    ATTCCCAA
-      ...
-      ```
-
-- For concepts provided in genomic coordinates, please provide them as bed file in the following way, repeats coordinates in the manuscript are downloaded from [RepeatMasker database](https://www.repeatmasker.org/):
-    ```text
-    <chrom>  <start> <end>    <strand>    <concept name>  
-    chr1	16363	16459	-	DNA/hAT-Charlie_Charlie15a
-    chr1	16713	16744	+	Simple_repeat_(TGG)n
-    chr1	18907	19048	+	LINE/L2_L2a
-    ...
-    ```
-
-- Additional required inputs:
-    - Genome fasta file
+- Required inputs:
+    - Genome fasa filet
     - Model in Pytorch
+
+- Concept source file:
+    - If you want to test motif concepts, please provide motifs in either of the two formats:
+        - Candidate motif PWMs in MEME MINIMAL format, motif database used in our manuscript is from [Jeff Viestra Lab](https://resources.altius.org/~jvierstra/projects/motif-clustering-v2.1beta/)
+        - A tab delimited file with consensus motif information, you can provide multiple consensus sequences for a single motif:
+          ```text
+          <motif_name>    <consensus_seq>
+          motif1    ATATAAAA
+          motif2    AACGGGCA
+          motif2    ATTCCCAA
+          ...
+          ```
+    
+    - If you want to test concepts provided in genomic coordinates, please provide them as bed file in the following way, repeats coordinates in the manuscript are downloaded from [RepeatMasker database](https://www.repeatmasker.org/):
+        ```text
+        <chrom>  <start> <end>    <strand>    <concept name>  
+        chr1	16363	16459	-	DNA/hAT-Charlie_Charlie15a
+        chr1	16713	16744	+	Simple_repeat_(TGG)n
+        chr1	18907	19048	+	LINE/L2_L2a
+        ...
+        ```
 
 > `tpcav` only works with Pytorch model, if your model is built using other libraries, you should port the model into Pytorch first. For Tensorflow models, you can use [tf2onnx](https://github.com/onnx/tensorflow-onnx) and [onnx2pytorch](https://github.com/Talmaj/onnx2pytorch) for the conversion.
 
@@ -55,6 +56,8 @@ For detailed usage for more flexibility on defining concepts, please refer to th
 ## Quick start
 
 Example usage on a simple model trained for predicting CTCF binding in MCF-7 cell line, you would need to download [hg38 genome](https://hgdownload.gi.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz) to run, other used files can be found in `data/` directory
+
+Here we test a couple of motif concepts (including CTCF cognate motif) and some sampled repeat concepts.
 
 ```python
 import torch
