@@ -124,7 +124,9 @@ concept_fscores_dataframe, motif_cav_trainers, bed_cav_trainer = run_tpcav(
     p=4) # number of concurrent SGDClassifier can be run at the same time, increase it if you have available CPU power, it speeds up training significantly
 ```
 
-There will be a `report.html` file generated in the output folder for quick inspection of the results
+There will be a `report.html` file generated in the output folder for quick inspection of the F-scores of concepts and the ranking.
+
+Then we can provide regions we are interested in to further evaluate how concepts influence model predictions.
 
 ```python
 from tpcav import report
