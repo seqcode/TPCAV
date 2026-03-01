@@ -180,11 +180,11 @@ motif_cav_trainers = torch.load("motif_cav_trainers.pt")
 bed_cav_trainer = torch.load("bed_cav_trainer.pt")
 
 # inspect trainer properties
-cav_trainer = motif_cav_trainers[0] # here we take the first motif cav trainer that correponds to the first number of motif insertions
+cav_trainer = motif_cav_trainers[4] # here we take the first motif cav trainer that correponds to the first number of motif insertions (4 insertions)
 # retrieve F-scores
-motif_cav_trainers[0].cav_fscores
+motif_cav_trainers[4].cav_fscores
 # retrieve CAVs
-motif_cav_trainers[0].cav_weights
+motif_cav_trainers[4].cav_weights
 ```
 
 You can also retrieve the model decorated by TPCAV parameters by
