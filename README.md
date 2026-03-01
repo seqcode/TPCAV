@@ -23,7 +23,7 @@ The same framework naturally extends to other domains, such as protein structure
 ## Inputs
 
 - Required inputs:
-    - Genome fasa filet
+    - Genome fasta file
     - Model in Pytorch
 
 - Concept source file:
