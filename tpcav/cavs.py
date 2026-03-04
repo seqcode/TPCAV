@@ -567,11 +567,11 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
     
     assert motif_file_fmt in ['meme', 'consensus']
 
-    cavs_fscores_df = pd.DataFrame({nm: cav_trainer.cav_fscores for nm, cav_trainer in zip(num_motif_insertions, cav_trainers)})
+    cavs_fscores_df = pd.DataFrame({f"fscore_{nm}_insertions": cav_trainer.cav_fscores for nm, cav_trainer in zip(num_motif_insertions, cav_trainers)})
     cavs_fscores_df['concept'] = list(cav_trainers[0].cav_fscores.keys())
 
     def compute_auc_fscore(row):
-        y = [row[nm] for nm in num_motif_insertions]
+        y = [row[f"fscore_{nm}_insertions"] for nm in num_motif_insertions]
         return np.trapz(y, num_motif_insertions) / (
             num_motif_insertions[-1] - num_motif_insertions[0]
         )

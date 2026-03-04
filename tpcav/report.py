@@ -28,7 +28,7 @@ def _render_kv_table(rows: list[tuple[str, str]]) -> str:
 def _render_df_table(df: Any, max_rows: int = 200) -> str:
     try:
         df2 = df.head(max_rows)
-        return df2.to_html(index=False, escape=True, classes="df")
+        return df2.to_html(index=False, escape=False, classes="df")
     except Exception:
         return f"<pre>{_html.escape(str(df)[:20000])}</pre>"
 
@@ -198,7 +198,7 @@ def generate_tpcav_html_report(
                 "source": "motif",
             }
             for nm in motif_insertions:
-                out[f"fscore_{nm}"] = row.get(nm)
+                out[f"fscore_{nm}_insertions"] = row.get(nm)
             out["AUC_fscores"] = row.get("AUC_fscores")
             out["Motif_concept_sensitivity_score (AUC_fscores_residual)"] = row.get("Motif_concept_sensitivity_score (AUC_fscores_residual)")
             concept_rows.append(out)
@@ -344,15 +344,16 @@ def generate_tpcav_html_report(
     # 5) Build JS payload (used by Plotly)
     # -----------------------------------------------------------------------------
     motif_logo_concepts = selected_motif_concepts[:]
+    motif_logo_dict = _maybe_build_motif_logo_data_uris(
+            motif_file if motif_file_fmt == "meme" else None,
+            motif_logo_concepts,
+        )
     js_payload: dict[str, Any] = {
         "motif_file_fmt": motif_file_fmt,
         "motif_auc_rows": motif_auc_df.to_dict(orient="records") if motif_auc_df is not None else None,
         "motif_insertions": motif_insertions,
         "concept_rows": concept_rows,
-        "motif_logos": _maybe_build_motif_logo_data_uris(
-            motif_file if motif_file_fmt == "meme" else None,
-            motif_logo_concepts,
-        ),
+        "motif_logos": motif_logo_dict,
         "heatmaps": {
             "motif": {"heatmap": None, "heatmap_div_id": "heatmap__motif", "hover_div_id": "hover__motif"},
             "non-motif": {"heatmap": None, "heatmap_div_id": "heatmap__non_motif", "hover_div_id": "hover__non_motif"},
@@ -432,6 +433,9 @@ def generate_tpcav_html_report(
 
     motif_auc_table_html = ""
     if motif_auc_df is not None:
+        # append motif logo column if exists
+        if motif_logo_dict is not None:
+            motif_auc_df['motif_logo'] = motif_auc_df.apply(lambda x: "<img src=\"" + motif_logo_dict[x['concept']] + "\" width=\"100\">", axis=1)
         motif_auc_table_html = _render_df_table(motif_auc_df, max_rows=5000)
 
     if embed_images:
@@ -480,7 +484,7 @@ def generate_tpcav_html_report(
 
         motif_cols = (
             ["rank", "concept"]
-            + [f"fscore_{nm}" for nm in motif_insertions]
+            + [f"fscore_{nm}_insertions" for nm in motif_insertions]
             + ["AUC_fscores", "Motif_concept_sensitivity_score (AUC_fscores_residual)", "source"]
         )
         extra_cols = ["concept", "source", "fscore"]
@@ -488,6 +492,9 @@ def generate_tpcav_html_report(
         if motif_concept_rows:
             motif_df = pd.DataFrame(motif_concept_rows)
             motif_df = motif_df[[c for c in motif_cols if c in motif_df.columns]]
+            # append motif logo column if exists
+            if motif_logo_dict is not None:
+                motif_df['motif_logo'] = motif_df.apply(lambda x: "<img src=\"" + motif_logo_dict[x['concept']] + "\" width=\"100\">", axis=1)
             motif_table_html = _render_df_table(motif_df, max_rows=5000)
         if non_motif_concept_rows:
             extra_df = pd.DataFrame(non_motif_concept_rows)
