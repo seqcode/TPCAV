@@ -434,7 +434,7 @@ def generate_tpcav_html_report(
     motif_auc_table_html = ""
     if motif_auc_df is not None:
         # append motif logo column if exists
-        if motif_logo_dict is not None:
+        if motif_file_fmt=='meme' and (len(motif_logo_dict)>0):
             motif_auc_df['motif_logo'] = motif_auc_df.apply(lambda x: "<img src=\"" + motif_logo_dict[x['concept']] + "\" width=\"100\">", axis=1)
         motif_auc_table_html = _render_df_table(motif_auc_df, max_rows=5000)
 
@@ -493,7 +493,7 @@ def generate_tpcav_html_report(
             motif_df = pd.DataFrame(motif_concept_rows)
             motif_df = motif_df[[c for c in motif_cols if c in motif_df.columns]]
             # append motif logo column if exists
-            if motif_logo_dict is not None:
+            if motif_file_fmt=='meme' and (len(motif_logo_dict)>0):
                 motif_df['motif_logo'] = motif_df.apply(lambda x: "<img src=\"" + motif_logo_dict[x['concept']] + "\" width=\"100\">", axis=1)
             motif_table_html = _render_df_table(motif_df, max_rows=5000)
         if non_motif_concept_rows:
@@ -542,6 +542,7 @@ def generate_tpcav_html_report(
     :root {{
       --bg: #0b1020;
       --panel: #111936;
+      --panel2: rgba(255,255,255,0.03);
       --text: #e7ecff;
       --muted: #b7c0e1;
       --warn: #f6c177;
@@ -549,6 +550,16 @@ def generate_tpcav_html_report(
       --border: rgba(231, 236, 255, 0.14);
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       --sans: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+    }}
+    [data-theme="light"] {{
+      --bg: #ffffff;
+      --panel: #f7f8fc;
+      --panel2: #ffffff;
+      --text: #0b1020;
+      --muted: #4b5563;
+      --warn: #a16207;
+      --err: #b91c1c;
+      --border: rgba(11, 16, 32, 0.14);
     }}
     body {{
       margin: 0;
@@ -567,6 +578,15 @@ def generate_tpcav_html_report(
       border-radius: 12px;
       padding: 18px 18px 14px;
     }}
+    [data-theme="light"] header {{
+      background: linear-gradient(180deg, rgba(247,248,252,0.95), rgba(247,248,252,0.65));
+    }}
+    .header-row {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }}
     h1 {{
       margin: 0 0 8px;
       font-size: 22px;
@@ -576,7 +596,7 @@ def generate_tpcav_html_report(
       margin-top: 18px;
       padding: 14px 14px 18px;
       border: 1px solid var(--border);
-      background: rgba(17,25,54,0.65);
+      background: var(--panel);
       border-radius: 12px;
     }}
     .trainer {{
@@ -612,7 +632,7 @@ def generate_tpcav_html_report(
       height: auto;
       border-radius: 10px;
       border: 1px solid var(--border);
-      background: rgba(255,255,255,0.03);
+      background: var(--panel2);
       margin: 12px 0 6px;
     }}
     .figure--half {{
@@ -623,7 +643,7 @@ def generate_tpcav_html_report(
       min-height: 520px;
       border-radius: 10px;
       border: 1px solid var(--border);
-      background: rgba(255,255,255,0.03);
+      background: var(--panel2);
       margin: 12px 0 6px;
     }}
     .plot--short {{
@@ -644,8 +664,14 @@ def generate_tpcav_html_report(
       cursor: pointer;
       font-size: 12px;
     }}
+    [data-theme="light"] .btn {{
+      background: rgba(0,0,0,0.03);
+    }}
     .btn:hover {{
       background: rgba(255,255,255,0.08);
+    }}
+    [data-theme="light"] .btn:hover {{
+      background: rgba(0,0,0,0.06);
     }}
     .btn:disabled {{
       opacity: 0.5;
@@ -681,7 +707,7 @@ def generate_tpcav_html_report(
       border: 1px solid var(--border);
       border-radius: 10px;
       margin-top: 10px;
-      background: rgba(0,0,0,0.12);
+      background: var(--panel2);
     }}
     .table-scroll table.df {{
       margin-top: 0;
@@ -726,7 +752,7 @@ def generate_tpcav_html_report(
       text-align: left;
       color: var(--muted);
       font-weight: 600;
-      background: rgba(255,255,255,0.03);
+      background: var(--panel2);
     }}
     table.kv {{
       border-collapse: collapse;
@@ -745,13 +771,13 @@ def generate_tpcav_html_report(
       width: 180px;
       text-align: left;
       color: var(--muted);
-      background: rgba(255,255,255,0.03);
+      background: var(--panel2);
       font-weight: 600;
     }}
     pre {{
       font-family: var(--mono);
       font-size: 12px;
-      background: rgba(0,0,0,0.25);
+      background: var(--panel2);
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px 12px;
@@ -762,13 +788,16 @@ def generate_tpcav_html_report(
   </style>
 </head>
 <body>
-		  <div class="container">
-		    <header>
-		      <h1>{_html.escape(title)}</h1>
-		      <div class="meta">Generated: {now}</div>
-		      {params_html}
-		      {assets_note}
-		    </header>
+  <div class="container">
+    <header>
+      <div class="header-row">
+        <h1>{_html.escape(title)}</h1>
+        <button id="theme_toggle" class="btn" type="button">Toggle theme</button>
+      </div>
+      <div class="meta">Generated: {now}</div>
+      {params_html}
+      {assets_note}
+    </header>
 
 			    <section>
 			      <h2>Concepts</h2>
@@ -819,6 +848,68 @@ def generate_tpcav_html_report(
 		  <script type="application/json" id="tpcav-report-data">{payload_json}</script>
 		  <script>
 		    (function() {{
+		      // Theme toggle (dark default).
+		      const themeBtn = document.getElementById("theme_toggle");
+		      function cssVar(name) {{
+		        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+		      }}
+		      function updatePlotlyTheme() {{
+		        if (!window.Plotly) return;
+		        const text = cssVar("--text") || "#000000";
+		        const muted = cssVar("--muted") || text;
+		        const border = cssVar("--border") || "rgba(0,0,0,0.15)";
+		        document.querySelectorAll(".js-plotly-plot").forEach((div) => {{
+		          const updates = {{
+		            "font.color": text,
+		            "paper_bgcolor": "rgba(0,0,0,0)",
+		            "plot_bgcolor": "rgba(0,0,0,0)",
+		            "title.font.color": text,
+		          }};
+		          const layout = div.layout || null;
+		          if (layout) {{
+		            Object.keys(layout).forEach((k) => {{
+		              if (!k.startsWith("xaxis") && !k.startsWith("yaxis")) return;
+		              updates[`${{k}}.tickfont.color`] = text;
+		              updates[`${{k}}.title.font.color`] = text;
+		              updates[`${{k}}.linecolor`] = border;
+		              updates[`${{k}}.gridcolor`] = border;
+		              updates[`${{k}}.zerolinecolor`] = border;
+		              updates[`${{k}}.tickcolor`] = border;
+		              updates[`${{k}}.color`] = text;
+		            }});
+		            if (Array.isArray(layout.annotations)) {{
+		              const anns = layout.annotations.map((a) => {{
+		                const font = Object.assign({{}}, a.font || {{}}, {{ color: text }});
+		                return Object.assign({{}}, a, {{ font }});
+		              }});
+		              updates["annotations"] = anns;
+		            }}
+		          }}
+		          try {{
+		            window.Plotly.relayout(div, updates);
+		          }} catch (e) {{
+		            // ignore
+		          }}
+		        }});
+		      }}
+		      function applyTheme(theme) {{
+		        document.documentElement.setAttribute("data-theme", theme);
+		        if (themeBtn) {{
+		          themeBtn.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+		        }}
+		        updatePlotlyTheme();
+		      }}
+		      const savedTheme = localStorage.getItem("tpcav_theme") || "light";
+		      applyTheme(savedTheme);
+		      if (themeBtn) {{
+		        themeBtn.addEventListener("click", () => {{
+		          const cur = document.documentElement.getAttribute("data-theme") || "dark";
+		          const next = cur === "dark" ? "light" : "dark";
+		          localStorage.setItem("tpcav_theme", next);
+		          applyTheme(next);
+		        }});
+		      }}
+
 		      const node = document.getElementById("tpcav-report-data");
 		      if (!node) return;
 		      const payload = JSON.parse(node.textContent);
@@ -1033,6 +1124,7 @@ def generate_tpcav_html_report(
 	        }});
 		        Plotly.newPlot("motif_auc_plots", traces, layout, {{displayModeBar: false}}).then(() => {{
               _ensureDownloadBar("motif_auc_plots", "motif_auc_plots");
+              updatePlotlyTheme();
             }});
 		      }}
 
@@ -1111,6 +1203,7 @@ def generate_tpcav_html_report(
 		          {{displayModeBar: false}}
 		        ).then(() => {{
               _ensureDownloadBar(entry.heatmap_div_id, "heatmap_" + kind);
+              updatePlotlyTheme();
             }});
 
 		        const hoverDiv = document.getElementById(entry.hover_div_id);
@@ -1160,8 +1253,9 @@ def generate_tpcav_html_report(
 		              yaxis: {{title: "Log TPCAV score", range: [-5, 5]}},
 			            }},
 			            {{displayModeBar: false}}
-			          ).then(() => {{
+		          ).then(() => {{
                 _ensureDownloadBar(divId, "bar_" + kind + "_attr_" + k);
+                updatePlotlyTheme();
               }});
 		        }});
 		      }}
