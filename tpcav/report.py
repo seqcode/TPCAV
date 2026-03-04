@@ -198,7 +198,7 @@ def generate_tpcav_html_report(
                 "source": "motif",
             }
             for nm in motif_insertions:
-                out[f"fscore_{nm}_insertions"] = row.get(nm)
+                out[f"fscore_{nm}_insertions"] = row.get(f"fscore_{nm}_insertions")
             out["AUC_fscores"] = row.get("AUC_fscores")
             out["Motif_concept_sensitivity_score (AUC_fscores_residual)"] = row.get("Motif_concept_sensitivity_score (AUC_fscores_residual)")
             concept_rows.append(out)
@@ -1218,9 +1218,10 @@ def generate_tpcav_html_report(
 		            if (!p) return;
 		            const xName = p.x;
 		            const yName = p.y;
+                    const zValue = p.z;
 		            const xLogo = logos[xName];
 		            const yLogo = logos[yName];
-		            let html = "<span>Hover:</span> " + xName + " × " + yName;
+                    let html = "<span>Cosine similarity:</span> " + xName + " × " + yName + ": " + zValue;
 		            if (xLogo) html += " <img alt='PWM " + xName + "' src='" + xLogo + "'/>";
 		            if (yLogo && yName !== xName) html += " <img alt='PWM " + yName + "' src='" + yLogo + "'/>";
 		            setHoverHtml(html);
