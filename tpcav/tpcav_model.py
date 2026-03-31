@@ -92,6 +92,8 @@ class TPCAV(torch.nn.Module):
         num_pc: Optional[Union[int, str]] = None,
     ) -> Dict[str, torch.Tensor]:
         """Sample activations, compute PCA, and attach buffers to the model."""
+        logger.info("Start building PCA transformation.")
+
         sampled_avs = []
         for concept in concepts:
             avs = self._sample_concept(concept, num_samples=num_samples_per_concept)
@@ -125,6 +127,8 @@ class TPCAV(torch.nn.Module):
         self._set_buffer("Vh", Vh.to(self.device) if Vh is not None else None)
         self._set_buffer("orig_shape", torch.tensor(orig_shape).to(self.device))
         self.fitted = True
+
+        logger.info("PCA transformation built.")
 
         return {
             "zscore_mean": mean,
