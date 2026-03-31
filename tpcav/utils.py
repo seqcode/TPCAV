@@ -192,9 +192,7 @@ class IterateSeqDataFrame(torch.utils.data.IterableDataset):
             if worker_info is None:
                 chunk = self.seq_df
             else:
-                chunk = np.array_split(self.seq_df, worker_info.num_workers)[
-                    worker_info.id
-                ]
+                chunk = [self.seq_df.iloc[idx] for idx in np.array_split(np.arange(len(self.seq_df)), worker_info.num_workers)][worker_info.id]
             yield from iterate_seq_df_chunk(
                 chunk,
                 genome=self.genome,
