@@ -346,7 +346,7 @@ class TPCAV(torch.nn.Module):
             handle.remove()
 
         if not cache:
-            raise RuntimeError(f"No activation captured for layer {self.layer_name}")
+            raise RuntimeError(f"No activation captured for layer {self.layer_name}; Are you sure it's used in forward function?")
         return cache[0]
 
     def _resolve_layer(self, name: str):
