@@ -40,8 +40,10 @@ class TPCAV(torch.nn.Module):
         self.fitted = False
         if layer is not None:
             self.layer = layer
+            self.layer_name = ""
         elif layer_name is not None:
             self.layer = self._resolve_layer(layer_name)
+            self.layer_name = layer_name
         else:
             raise Exception(
                 "You have to specify either layer or layer_name to construct TPCAV model"
