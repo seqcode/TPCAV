@@ -23,7 +23,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import GridSearchCV
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
 import logomaker
+import multiprocessing as mp
 
 from . import helper, utils, report
 from .concepts import ConceptBuilder
@@ -32,16 +34,6 @@ from matplotlib import gridspec
 
 logger = logging.getLogger(__name__)
 
-
-def _load_all_tensors_to_numpy(dataloaders: Iterable[DataLoader]):
-    if not isinstance(dataloaders, list):
-        dataloaders = [dataloaders]
-    avs, ls = [], []
-    for dataloader in dataloaders:
-        for av, l in dataloader:
-            avs.append(av.cpu().numpy())
-            ls.append(l.cpu().numpy())
-    return np.concatenate(avs), np.concatenate(ls)
 
 
 class _SGDWrapper:
@@ -66,8 +58,7 @@ class _SGDWrapper:
             raise ValueError(f"Unexpected penalty type {penalty}")
         self.search = GridSearchCV(self.lm, params)
 
-    def fit(self, train_dl: DataLoader, val_dl: DataLoader):
-        train_avs, train_ls = _load_all_tensors_to_numpy([train_dl, val_dl])
+    def fit(self, train_avs: np.ndarray, train_ls: np.ndarray):
         self.search.fit(train_avs, train_ls)
         self.lm = self.search.best_estimator_
         logger.info(
@@ -89,6 +80,31 @@ class _SGDWrapper:
     def predict(self, x: np.ndarray) -> np.ndarray:
         return self.lm.predict(x)
 
+def prepare_xy(concept_embeddings, control_embeddings, seed=42):
+    # move to CPU + numpy, just double confirm
+    concept = concept_embeddings.detach().cpu().numpy()
+    control = control_embeddings.detach().cpu().numpy()
+
+    # labels
+    y_concept = np.zeros(len(concept), dtype=np.int64)
+    y_control = np.ones(len(control), dtype=np.int64)
+
+    # combine
+    X = np.concatenate([concept, control], axis=0)
+    y = np.concatenate([y_concept, y_control], axis=0)
+
+    # flatten if needed (SGDClassifier expects 2D)
+    X = X.reshape(X.shape[0], -1)
+
+    # split: train vs temp (val+test)
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y,
+        test_size=0.1,
+        random_state=seed,
+        stratify=y,   # keeps class balance
+    )
+
+    return X_train, y_train, X_test, y_test
 
 def _train(
     concept_embeddings: torch.Tensor,
@@ -102,34 +118,19 @@ def _train(
     Requires set_control to have been called beforehand.
     """
     output_dir = Path(output_dir)
-
-    avd = TensorDataset(
-        concept_embeddings, torch.full((concept_embeddings.shape[0],), 0)
-    )
-    cvd = TensorDataset(
-        control_embeddings, torch.full((control_embeddings.shape[0],), 1)
-    )
-    train_ds, val_ds, test_ds = random_split(avd, [0.8, 0.1, 0.1])
-    c_train, c_val, c_test = random_split(cvd, [0.8, 0.1, 0.1])
-
-    train_dl = DataLoader(train_ds + c_train, batch_size=32, shuffle=True)
-    val_dl = DataLoader(val_ds + c_val, batch_size=32)
-    test_dl = DataLoader(test_ds + c_test, batch_size=32)
-
+    
+    train_avs, train_l, test_avs, test_l = prepare_xy(concept_embeddings, control_embeddings)
+    
     clf = _SGDWrapper(penalty=penalty)
-    clf.fit(train_dl, val_dl)
+    clf.fit(train_avs, train_l)
 
-    def _eval(split_dl: DataLoader, name: str):
-        y_preds, y_trues = [], []
-        for x, y in split_dl:
-            y_pred = clf.predict(x.cpu().numpy())
-            y_preds.append(y_pred)
-            y_trues.append(y.cpu().numpy())
-        y_preds = np.concatenate(y_preds)
-        y_trues = np.concatenate(y_trues)
-        acc = (y_preds == y_trues).sum() / len(y_trues)
+    def _eval(avs, l, name: str):
+        
+        y_preds = clf.predict(avs)
+
+        acc = (y_preds == l).sum() / len(l)
         precision, recall, fscore, support = precision_recall_fscore_support(
-            y_trues, y_preds, average="binary", pos_label=1
+            l, y_preds, average="binary", pos_label=1
         )
         logger.info("[%s] Accuracy: %.4f", name, acc)
         (output_dir / f"classifier_perform_on_{name}.txt").write_text(
@@ -138,9 +139,8 @@ def _train(
         return fscore
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    _eval(train_dl, "train")
-    _eval(val_dl, "val")
-    test_fscore = _eval(test_dl, "test")
+    _eval(train_avs, train_l, "train")
+    test_fscore = _eval(test_avs, test_l, "test")
 
     weights = clf.weights
     assert len(weights.shape) == 2 and weights.shape[0] == 2
@@ -230,7 +230,8 @@ class CavTrainer:
                 self.cavs_list.append(weight)
         else:
             futures = []
-            with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            ctx = mp.get_context("spawn")
+            with ProcessPoolExecutor(mp_context=ctx, max_workers=num_processes) as executor:
                 for c in concept_list:
                     concept_embeddings = self.tpcav.concept_embeddings(
                         c, num_samples=num_samples

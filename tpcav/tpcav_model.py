@@ -92,6 +92,7 @@ class TPCAV(torch.nn.Module):
         num_pc: Optional[Union[int, str]] = None,
     ) -> Dict[str, torch.Tensor]:
         """Sample activations, compute PCA, and attach buffers to the model."""
+
         logger.info("Start building PCA transformation.")
 
         sampled_avs = []
