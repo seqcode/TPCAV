@@ -238,7 +238,7 @@ def _train(
 
     Requires set_control to have been called beforehand.
     """
-    assert backend in ["sklearn", "torch"]
+    assert backend in ["sklearn", "torch"], "Backend has to be either sklearn or torch!"
 
     output_dir = Path(output_dir)
     
@@ -790,6 +790,7 @@ def run_tpcav(
     generate_html_report=True,
     html_report_fscore_thresh=0.9,
     seed=1001,
+    backend='sklearn',
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -877,13 +878,13 @@ def run_tpcav(
             cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
                                              num_samples_for_cav, 
                                              output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                             num_processes=p, max_pending=max_pending_jobs)
+                                             num_processes=p, max_pending=max_pending_jobs, backend=backend)
         else:
             cav_trainer.set_control(motif_concept_builders[nm].control_concepts[0], num_samples=num_samples_for_cav)
             cav_trainer.train_concepts([c for c, _ in motif_concepts_pairs[nm]],
                                         num_samples_for_cav,
                                         output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                        num_processes=p, max_pending=max_pending_jobs)
+                                        num_processes=p, max_pending=max_pending_jobs, backend=backend)
         if save_cav_trainer:
             torch.save(cav_trainer, str(output_path / f"cavs_{nm}_motifs/cav_trainer.pt"))
         motif_cav_trainers[nm] = cav_trainer
@@ -897,6 +898,7 @@ def run_tpcav(
             num_samples_for_cav,
             output_dir=str(output_path / f"cavs_bed_concepts/"),
             num_processes=p,
+            backend=backend
         )
         if save_cav_trainer:
             torch.save(bed_cav_trainer, str(output_path / f"cavs_bed_concepts/cav_trainer.pt"))
