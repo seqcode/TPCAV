@@ -130,7 +130,7 @@ class _TorchLinearWrapper:
         
         best_state_dict = None; best_loss = None
         for w in self.weight_decay_search:
-            model = _TorchLinear(self.input_dim, self.num_class).to(self.device)
+            model = _TorchLinear(self.input_dim, self.num_class, device=self.device).to(self.device)
             state_dict, loss = model.fit(train_avs, train_ls, val_avs, val_ls, lr=self.lr, weight_decay=w)
             if (best_loss is None) or (loss < best_loss):
                 best_loss = loss
@@ -237,6 +237,7 @@ def _train(
     output_dir: str,
     penalty: str = "l2",
     backend: str = "sklearn",
+    device=None,
 ) -> Tuple[float, torch.Tensor]:
     """
     Train a binary CAV classifier for a concept vs cached control embeddings.
@@ -255,8 +256,9 @@ def _train(
         # replace label 0 as -1 to accomodate hinge loss
         train_l[train_l==0] = -1
         test_l[test_l==0] = -1
-
-        clf = _TorchLinearWrapper(input_dim= train_avs.shape[1])
+        
+        device = device or ('cuda:0' if torch.cuda.is_available else 'cpu')
+        clf = _TorchLinearWrapper(input_dim= train_avs.shape[1], device=device)
     clf.fit(train_avs, train_l)
     
     #breakpoint()
@@ -348,6 +350,7 @@ class CavTrainer:
         num_processes: int = 1,
         max_pending: int = 8,
         backend='sklearn',
+        device=None
     ):
         "Train concepts with a fixed control set by self.set_control()"
         if self.control_embeddings is None:
@@ -367,7 +370,8 @@ class CavTrainer:
                     self.control_embeddings.cpu(),
                     Path(output_dir) / c.name,
                     self.penalty,
-                    backend=backend
+                    backend=backend,
+                    device=device
                 )
                 self.cav_fscores[c.name] = fscore
                 self.cav_weights[c.name] = weight
@@ -399,7 +403,8 @@ class CavTrainer:
                         self.control_embeddings,
                         Path(output_dir) / c.name,
                         self.penalty,
-                        backend=backend
+                        backend=backend,
+                        device=device
                     )
                     logger.info("Submitted CAV training for concept %s", c.name)
                     futures.append((c.name, future))
@@ -416,7 +421,8 @@ class CavTrainer:
                              output_dir: str,
                              num_processes: int = 1,
                              max_pending: int = 8,
-                             backend='sklearn'):
+                             backend='sklearn',
+                             device=None):
         """Train concept pairs (test concept, control concept)
 
         Note: It would compute embeddings on every control concept, use self.train_concepts if control concept is fixed
@@ -435,7 +441,8 @@ class CavTrainer:
                     control_embeddings.cpu(),
                     Path(output_dir) / c_test.name,
                     self.penalty,
-                    backend=backend
+                    backend=backend,
+                    device=device
                 )
                 self.cav_fscores[c_test.name] = fscore
                 self.cav_weights[c_test.name] = weight
@@ -469,7 +476,8 @@ class CavTrainer:
                         control_embeddings.cpu(),
                         Path(output_dir) / c_test.name,
                         self.penalty,
-                        backend=backend
+                        backend=backend,
+                        device=device
                     )
                     logger.info("Submitted CAV training for concept %s", c_test.name)
                     futures.append((c_test.name, future))
@@ -802,6 +810,7 @@ def run_tpcav(
     html_report_fscore_thresh=0.9,
     seed=1001,
     backend='sklearn',
+    device=None,
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -889,13 +898,13 @@ def run_tpcav(
             cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
                                              num_samples_for_cav, 
                                              output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                             num_processes=p, max_pending=max_pending_jobs, backend=backend)
+                                             num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device)
         else:
             cav_trainer.set_control(motif_concept_builders[nm].control_concepts[0], num_samples=num_samples_for_cav)
             cav_trainer.train_concepts([c for c, _ in motif_concepts_pairs[nm]],
                                         num_samples_for_cav,
                                         output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                        num_processes=p, max_pending=max_pending_jobs, backend=backend)
+                                        num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device)
         if save_cav_trainer:
             torch.save(cav_trainer, str(output_path / f"cavs_{nm}_motifs/cav_trainer.pt"))
         motif_cav_trainers[nm] = cav_trainer
@@ -909,7 +918,8 @@ def run_tpcav(
             num_samples_for_cav,
             output_dir=str(output_path / f"cavs_bed_concepts/"),
             num_processes=p,
-            backend=backend
+            backend=backend,
+            device=device
         )
         if save_cav_trainer:
             torch.save(bed_cav_trainer, str(output_path / f"cavs_bed_concepts/cav_trainer.pt"))

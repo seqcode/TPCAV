@@ -279,7 +279,7 @@ class TPCAVTest(unittest.TestCase):
         cav_trainer.set_control(builder.control_concepts[0], num_samples=100)
 
         cav_trainer.train_concepts(
-            builder.concepts, 100, output_dir="data/cavs/", num_processes=2, backend='torch'
+                builder.concepts, 100, output_dir="data/cavs/", num_processes=2, backend='torch', device='cuda:1' if torch.cuda.device_count() > 1 else 'cuda:0', 
         )
         cav_trainer.train_concepts(
             builder.concepts, 100, output_dir="data/cavs/", num_processes=2
