@@ -19,6 +19,7 @@ import seaborn as sns
 import torch
 from copy import deepcopy
 from scipy import stats
+import uuid
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics.pairwise import cosine_similarity
@@ -202,9 +203,12 @@ class _SGDWrapper:
         return self.lm.predict(x)
 
 def prepare_xy(concept_embeddings, control_embeddings, seed=42):
+    def _to_numpy(emb):
+        return np.load(str(emb), mmap_mode="r")
+
     # move to CPU + numpy, just double confirm
-    concept = concept_embeddings.detach().cpu().numpy()
-    control = control_embeddings.detach().cpu().numpy()
+    concept = _to_numpy(concept_embeddings)
+    control = _to_numpy(control_embeddings)
 
     # labels
     y_concept = np.zeros(len(concept), dtype=np.int64)
@@ -228,8 +232,8 @@ def prepare_xy(concept_embeddings, control_embeddings, seed=42):
     return X_train, y_train, X_test, y_test
 
 def _train(
-    concept_embeddings: torch.Tensor,
-    control_embeddings: torch.Tensor,
+    concept_embeddings: str,
+    control_embeddings: str,
     output_dir: str,
     penalty: str = "l2",
     backend: str = "sklearn",
@@ -338,6 +342,44 @@ class CavTrainer:
         )
         return self.control_embeddings
 
+    @staticmethod
+    def _save_tensor_npy(path: Path, tensor: torch.Tensor) -> str:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(path, tensor.detach().cpu().numpy())
+        return str(path)
+
+    @staticmethod
+    def _cleanup_paths(paths: list[str]) -> None:
+        for p in paths:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    @classmethod
+    def _reap_done_futures(cls, futures: list):
+        pending = []
+        for name, fut, paths in futures:
+            if fut.done():
+                fut.result()  # raises if worker failed
+                cls._cleanup_paths(paths)
+            else:
+                pending.append((name, fut, paths))
+        return pending
+
+    @classmethod
+    def _wait_for_capacity(
+        cls,
+        futures: list,
+        capacity: int,
+        sleep_s: int = 5,
+    ):
+        while True:
+            futures = cls._reap_done_futures(futures)
+            if len(futures) < capacity:
+                return futures
+            time.sleep(sleep_s)
+
     def train_concepts(
         self,
         concept_list,
@@ -356,15 +398,24 @@ class CavTrainer:
         else:
             self.control_embeddings = self.control_embeddings.cpu()
 
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+        control_memmap_path = output_dir_path / f"_control_embeddings_{uuid.uuid4().hex}.npy"
+        self._save_tensor_npy(control_memmap_path, self.control_embeddings)
+
         if num_processes == 1:
             for c in concept_list:
                 concept_embeddings = self.tpcav.concept_embeddings(
                     c, num_samples=num_samples
                 )
+                concept_dir = output_dir_path / c.name
+                concept_dir.mkdir(parents=True, exist_ok=True)
+                concept_memmap_path = concept_dir / "concept_embeddings.npy"
+                self._save_tensor_npy(concept_memmap_path, concept_embeddings)
                 fscore, weight = _train(
-                    concept_embeddings.cpu(),
-                    self.control_embeddings.cpu(),
-                    Path(output_dir) / c.name,
+                    str(concept_memmap_path),
+                    str(control_memmap_path),
+                    concept_dir,
                     self.penalty,
                     backend=backend,
                     device=device
@@ -372,6 +423,8 @@ class CavTrainer:
                 self.cav_fscores[c.name] = fscore
                 self.cav_weights[c.name] = weight
                 self.cavs_list.append(weight)
+
+                self._cleanup_paths([str(concept_memmap_path)])
         else:
             futures = []
             ctx = mp.get_context("spawn")
@@ -381,35 +434,38 @@ class CavTrainer:
                         c, num_samples=num_samples
                     )
 
+                    concept_dir = output_dir_path / c.name
+                    concept_dir.mkdir(parents=True, exist_ok=True)
+                    concept_memmap_path = concept_dir / "concept_embeddings.npy"
+                    self._save_tensor_npy(concept_memmap_path, concept_embeddings)
+
                     # block the process to avoid too long queue
-                    while True:
-                        done = [f for (_, f) in futures if f.done()]
-                        for f in done:
-                            f.result()  # raises if worker failed
-
-                        pending = [f for (_, f) in futures if not f.done()]
-                        if len(pending) < (max_pending + num_processes):
-                            break
-
-                        time.sleep(5)
+                    futures = self._wait_for_capacity(
+                        futures, capacity=(max_pending + num_processes), sleep_s=5
+                    )
 
                     future = executor.submit(
                         _train,
-                        concept_embeddings.cpu(),
-                        self.control_embeddings,
-                        Path(output_dir) / c.name,
+                        str(concept_memmap_path),
+                        str(control_memmap_path),
+                        concept_dir,
                         self.penalty,
                         backend=backend,
                         device=device
                     )
                     logger.info("Submitted CAV training for concept %s", c.name)
-                    futures.append((c.name, future))
+                    futures.append((c.name, future, [str(concept_memmap_path)]))
 
-                results = [(name, f.result()) for name, f in futures]
+                results = []
+                for name, fut, paths in futures:
+                    results.append((name, fut.result()))
+                    self._cleanup_paths(paths)
             for name, (fscore, weight) in results:
                 self.cav_fscores[name] = fscore
                 self.cav_weights[name] = weight
                 self.cavs_list.append(weight)
+
+        self._cleanup_paths([str(control_memmap_path)])
 
     def train_concepts_pairs(self,
                              concept_pair_list,
@@ -423,6 +479,9 @@ class CavTrainer:
 
         Note: It would compute embeddings on every control concept, use self.train_concepts if control concept is fixed
         """
+        output_dir_path = Path(output_dir)
+        output_dir_path.mkdir(parents=True, exist_ok=True)
+
         if num_processes == 1:
             for c_test, c_control in concept_pair_list:
                 concept_embeddings = self.tpcav.concept_embeddings(
@@ -432,10 +491,17 @@ class CavTrainer:
                     c_control, num_samples=num_samples
                 )
 
+                concept_dir = output_dir_path / c_test.name
+                concept_dir.mkdir(parents=True, exist_ok=True)
+                concept_memmap_path = concept_dir / "concept_embeddings.npy"
+                control_memmap_path = concept_dir / "control_embeddings.npy"
+                self._save_tensor_npy(concept_memmap_path, concept_embeddings)
+                self._save_tensor_npy(control_memmap_path, control_embeddings)
+
                 fscore, weight = _train(
-                    concept_embeddings.cpu(),
-                    control_embeddings.cpu(),
-                    Path(output_dir) / c_test.name,
+                    str(concept_memmap_path),
+                    str(control_memmap_path),
+                    concept_dir,
                     self.penalty,
                     backend=backend,
                     device=device
@@ -443,6 +509,8 @@ class CavTrainer:
                 self.cav_fscores[c_test.name] = fscore
                 self.cav_weights[c_test.name] = weight
                 self.cavs_list.append(weight)
+
+                self._cleanup_paths([str(concept_memmap_path), str(control_memmap_path)])
         else:
             futures = []
             with ProcessPoolExecutor(max_workers=num_processes) as executor:
@@ -454,31 +522,40 @@ class CavTrainer:
                         c_control, num_samples=num_samples
                     )
 
+                    concept_dir = output_dir_path / c_test.name
+                    concept_dir.mkdir(parents=True, exist_ok=True)
+                    concept_memmap_path = concept_dir / "concept_embeddings.npy"
+                    control_memmap_path = concept_dir / "control_embeddings.npy"
+                    self._save_tensor_npy(concept_memmap_path, concept_embeddings)
+                    self._save_tensor_npy(control_memmap_path, control_embeddings)
+
                     # block the process to avoid too long queue
-                    while True:
-                        done = [f for (_, f) in futures if f.done()]
-                        for f in done:
-                            f.result()  # raises if worker failed
-
-                        pending = [f for (_, f) in futures if not f.done()]
-                        if len(pending) < (max_pending + num_processes):
-                            break
-
-                        time.sleep(5)
+                    futures = self._wait_for_capacity(
+                        futures, capacity=(max_pending + num_processes), sleep_s=5
+                    )
 
                     future = executor.submit(
                         _train,
-                        concept_embeddings.cpu(),
-                        control_embeddings.cpu(),
-                        Path(output_dir) / c_test.name,
+                        str(concept_memmap_path),
+                        str(control_memmap_path),
+                        concept_dir,
                         self.penalty,
                         backend=backend,
                         device=device
                     )
                     logger.info("Submitted CAV training for concept %s", c_test.name)
-                    futures.append((c_test.name, future))
+                    futures.append(
+                        (
+                            c_test.name,
+                            future,
+                            [str(concept_memmap_path), str(control_memmap_path)],
+                        )
+                    )
 
-                results = [(name, f.result()) for name, f in futures]
+                results = []
+                for name, fut, paths in futures:
+                    results.append((name, fut.result()))
+                    self._cleanup_paths(paths)
             for name, (fscore, weight) in results:
                 self.cav_fscores[name] = fscore
                 self.cav_weights[name] = weight
