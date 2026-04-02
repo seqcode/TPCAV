@@ -279,7 +279,7 @@ class TPCAVTest(unittest.TestCase):
         cav_trainer.set_control(builder.control_concepts[0], num_samples=100)
 
         cav_trainer.train_concepts(
-            builder.concepts, 100, output_dir="data/cavs/", num_processes=1, backend='torch'
+            builder.concepts, 100, output_dir="data/cavs/", num_processes=2, backend='torch'
         )
         cav_trainer.train_concepts(
             builder.concepts, 100, output_dir="data/cavs/", num_processes=2

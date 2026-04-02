@@ -5,6 +5,7 @@ CAV training and attribution utilities built on TPCAV.
 
 import logging
 import os
+import gc
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple, Union
 import time
@@ -134,6 +135,10 @@ class _TorchLinearWrapper:
             if (best_loss is None) or (loss < best_loss):
                 best_loss = loss
                 best_state_dict = state_dict
+
+            del model
+            gc.collect()
+            torch.cuda.empty_cache()
             
         self.best_model = _TorchLinear(self.input_dim, self.num_class)
         self.best_model.load_state_dict(best_state_dict)
@@ -276,6 +281,12 @@ def _train(
     weights = clf.weights
     assert len(weights.shape) == 2 and weights.shape[0] == 2
     torch.save(weights, output_dir / "classifier_weights.pt")
+
+    if backend == 'torch':
+        # release gpu memroy
+        del clf.best_model
+        gc.collect()
+        torch.cuda.empty_cache()
 
     return test_fscore, weights[0]
 
