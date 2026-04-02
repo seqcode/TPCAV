@@ -58,10 +58,6 @@ class _TorchLinear(torch.nn.Module):
     def fit(self, train_avs: np.ndarray, train_ls: np.ndarray,
             val_avs: np.ndarray, val_ls: np.ndarray,
             patience=10, lr=1e-2, weight_decay=1e-2, max_epochs=1000):
-        train_avs = torch.from_numpy(train_avs)
-        train_ls = torch.from_numpy(train_ls)
-        val_avs = torch.from_numpy(val_avs)
-        val_ls = torch.from_numpy(val_ls)
 
         optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=weight_decay)
         
@@ -80,8 +76,8 @@ class _TorchLinear(torch.nn.Module):
             for i in range(0, len(train_avs), 32):
                 optimizer.zero_grad()
 
-                avs = train_avs[i: (i+32)]
-                l = train_ls[i: (i+32)]
+                avs = torch.from_numpy(train_avs[i: (i+32)])
+                l = torch.from_numpy(train_ls[i: (i+32)])
             
                 y_hat = self(avs.to(self.device))
                 loss = torch.mean(torch.clamp(1 - l.to(self.device) * y_hat, min=0))
@@ -94,8 +90,8 @@ class _TorchLinear(torch.nn.Module):
             self.eval()
             val_loss_all = []
             for i in range(0, len(val_avs), 32):
-                avs = val_avs[i: (i+32)]
-                l = val_ls[i: (i+32)]
+                avs = torch.from_numpy(val_avs[i: (i+32)])
+                l = torch.from_numpy(val_ls[i: (i+32)])
 
                 y_hat = self(avs.to(self.device))
                 val_loss = torch.mean(torch.clamp(1 - l.to(self.device) * y_hat, min=0))
