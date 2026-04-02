@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
+from copy import deepcopy
 from scipy import stats
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
@@ -35,6 +36,125 @@ from matplotlib import gridspec
 logger = logging.getLogger(__name__)
 
 
+class _TorchLinear(torch.nn.Module):
+    """Torch linear layer classifier"""
+
+    def __init__(self, input_dim, num_class=1, device='cuda:0'):
+        super().__init__()
+        self.linear = torch.nn.Linear(input_dim, num_class)
+        self.device = device
+
+    def forward(self, avs):
+        return self.linear(avs).squeeze(-1)
+
+    def shuffle_tensor(self, *tensors):
+        p = torch.randperm(len(tensors[0]))
+        
+        new_tensors = [t[p] for t in tensors]
+
+        return new_tensors
+    
+    def fit(self, train_avs: np.ndarray, train_ls: np.ndarray,
+            val_avs: np.ndarray, val_ls: np.ndarray,
+            patience=10, lr=1e-2, weight_decay=1e-2, max_epochs=1000):
+        train_avs = torch.from_numpy(train_avs)
+        train_ls = torch.from_numpy(train_ls)
+        val_avs = torch.from_numpy(val_avs)
+        val_ls = torch.from_numpy(val_ls)
+
+        optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=weight_decay)
+        
+        best_loss = None
+        best_state_dict = None
+        epoch = 0
+        t = 0
+        while True:
+            epoch += 1
+            if epoch > max_epochs: break
+
+            #shuffle the tensors before every epoch
+            train_avs, train_ls = self.shuffle_tensor(train_avs, train_ls)
+            
+            self.train()
+            for i in range(0, len(train_avs), 32):
+                optimizer.zero_grad()
+
+                avs = train_avs[i: (i+32)]
+                l = train_ls[i: (i+32)]
+            
+                y_hat = self(avs.to(self.device))
+                loss = torch.mean(torch.clamp(1 - l.to(self.device) * y_hat, min=0))
+
+                loss.backward()
+                optimizer.step()
+
+            logger.debug(f"Training loss at epoch {epoch}: {loss}")
+            
+            self.eval()
+            val_loss_all = []
+            for i in range(0, len(val_avs), 32):
+                avs = val_avs[i: (i+32)]
+                l = val_ls[i: (i+32)]
+
+                y_hat = self(avs.to(self.device))
+                val_loss = torch.mean(torch.clamp(1 - l.to(self.device) * y_hat, min=0))
+
+                val_loss_all.append(val_loss.item())
+
+            val_loss_all = np.mean(val_loss_all)
+
+            #logger.debug(f"Validation loss at epoch {epoch}: {val_loss_all}, patience {t} out of {patience}")
+
+            if (best_loss is None) or (val_loss_all < best_loss):
+                best_loss = val_loss_all
+                best_state_dict = deepcopy(self.state_dict())
+            else:
+                t += 1
+                if t >= patience: break
+        
+        return best_state_dict, best_loss
+
+class _TorchLinearWrapper:
+    def __init__(self, input_dim, num_class=1, lr=1e-2, weight_decay_search = [1e-2, 1e-4, 1e-6], device="cuda:0"):
+        super().__init__()
+        self.input_dim = input_dim
+        self.num_class = num_class
+        self.lr = lr
+        self.weight_decay_search = weight_decay_search
+        self.device = device
+
+    def fit(self, train_val_avs: np.ndarray, train_val_ls: np.ndarray):
+
+        train_avs, val_avs, train_ls, val_ls = train_test_split(train_val_avs, train_val_ls, test_size=0.1)
+        
+        best_state_dict = None; best_loss = None
+        for w in self.weight_decay_search:
+            model = _TorchLinear(self.input_dim, self.num_class).to(self.device)
+            state_dict, loss = model.fit(train_avs, train_ls, val_avs, val_ls, lr=self.lr, weight_decay=w)
+            if (best_loss is None) or (loss < best_loss):
+                best_loss = loss
+                best_state_dict = state_dict
+            
+        self.best_model = _TorchLinear(self.input_dim, self.num_class)
+        self.best_model.load_state_dict(best_state_dict)
+        self.best_model.to(self.device)
+
+    def predict(self, avs: np.ndarray):
+        y_hat = self.best_model(torch.from_numpy(avs).to(self.device))
+
+        y_hat[y_hat>=0] = 1
+        y_hat[y_hat<0] = -1
+
+        return y_hat.detach().cpu().numpy()
+    
+    @property
+    def weights(self):
+        linear_weight = self.best_model.linear.weight.detach().cpu()[0]
+        return torch.stack([-1 * linear_weight, linear_weight])
+
+    @property
+    def classes_(self):
+        return self.num_class
 
 class _SGDWrapper:
     """Lightweight SGD concept classifier."""
@@ -111,19 +231,30 @@ def _train(
     control_embeddings: torch.Tensor,
     output_dir: str,
     penalty: str = "l2",
+    backend: str = "sklearn",
 ) -> Tuple[float, torch.Tensor]:
     """
     Train a binary CAV classifier for a concept vs cached control embeddings.
 
     Requires set_control to have been called beforehand.
     """
+    assert backend in ["sklearn", "torch"]
+
     output_dir = Path(output_dir)
     
     train_avs, train_l, test_avs, test_l = prepare_xy(concept_embeddings, control_embeddings)
     
-    clf = _SGDWrapper(penalty=penalty)
-    clf.fit(train_avs, train_l)
+    if backend == "sklearn":
+        clf = _SGDWrapper(penalty=penalty)
+    else:
+        # replace label 0 as -1 to accomodate hinge loss
+        train_l[train_l==0] = -1
+        test_l[test_l==0] = -1
 
+        clf = _TorchLinearWrapper(input_dim= train_avs.shape[1])
+    clf.fit(train_avs, train_l)
+    
+    #breakpoint()
     def _eval(avs, l, name: str):
         
         y_preds = clf.predict(avs)
@@ -204,7 +335,8 @@ class CavTrainer:
         num_samples: int,
         output_dir: str,
         num_processes: int = 1,
-        max_pending: int = 8
+        max_pending: int = 8,
+        backend='sklearn',
     ):
         "Train concepts with a fixed control set by self.set_control()"
         if self.control_embeddings is None:
@@ -224,6 +356,7 @@ class CavTrainer:
                     self.control_embeddings.cpu(),
                     Path(output_dir) / c.name,
                     self.penalty,
+                    backend=backend
                 )
                 self.cav_fscores[c.name] = fscore
                 self.cav_weights[c.name] = weight
@@ -255,6 +388,7 @@ class CavTrainer:
                         self.control_embeddings,
                         Path(output_dir) / c.name,
                         self.penalty,
+                        backend=backend
                     )
                     logger.info("Submitted CAV training for concept %s", c.name)
                     futures.append((c.name, future))
@@ -270,7 +404,8 @@ class CavTrainer:
                              num_samples: int,
                              output_dir: str,
                              num_processes: int = 1,
-                             max_pending: int = 8):
+                             max_pending: int = 8,
+                             backend='sklearn'):
         """Train concept pairs (test concept, control concept)
 
         Note: It would compute embeddings on every control concept, use self.train_concepts if control concept is fixed
@@ -289,6 +424,7 @@ class CavTrainer:
                     control_embeddings.cpu(),
                     Path(output_dir) / c_test.name,
                     self.penalty,
+                    backend=backend
                 )
                 self.cav_fscores[c_test.name] = fscore
                 self.cav_weights[c_test.name] = weight
@@ -322,6 +458,7 @@ class CavTrainer:
                         control_embeddings.cpu(),
                         Path(output_dir) / c_test.name,
                         self.penalty,
+                        backend=backend
                     )
                     logger.info("Submitted CAV training for concept %s", c_test.name)
                     futures.append((c_test.name, future))
