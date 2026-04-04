@@ -83,7 +83,7 @@ def _maybe_build_motif_logo_data_uris(
         buf = io.BytesIO()
         fig.savefig(buf, format="png", dpi=200, bbox_inches="tight", transparent=True)
         plt.close(fig)
-        out[str(name)] = "data:image/png;base64," + base64.b64encode(
+        out[_utils.clean_motif_name(str(name))] = "data:image/png;base64," + base64.b64encode(
             buf.getvalue()
         ).decode("ascii")
 
@@ -343,10 +343,9 @@ def generate_tpcav_html_report(
     # -----------------------------------------------------------------------------
     # 5) Build JS payload (used by Plotly)
     # -----------------------------------------------------------------------------
-    motif_logo_concepts = selected_motif_concepts[:]
     motif_logo_dict = _maybe_build_motif_logo_data_uris(
             motif_file if motif_file_fmt == "meme" else None,
-            motif_logo_concepts,
+            selected_motif_concepts,
         )
     js_payload: dict[str, Any] = {
         "motif_file_fmt": motif_file_fmt,
@@ -435,7 +434,7 @@ def generate_tpcav_html_report(
     if motif_auc_df is not None:
         # append motif logo column if exists
         if motif_file_fmt=='meme' and (len(motif_logo_dict)>0):
-            motif_auc_df['motif_logo'] = motif_auc_df.apply(lambda x: "<img src=\"" + motif_logo_dict[x['concept']] + "\" width=\"100\">", axis=1)
+            motif_auc_df['motif_logo'] = motif_auc_df.apply(lambda x: "<img src=\"" + motif_logo_dict.get(x['concept'], 'null') + "\" width=\"100\">", axis=1)
         motif_auc_table_html = _render_df_table(motif_auc_df, max_rows=5000)
 
     if embed_images:

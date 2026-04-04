@@ -238,6 +238,7 @@ def _train(
     penalty: str = "l2",
     backend: str = "sklearn",
     device=None,
+    name=None,
 ) -> Tuple[float, torch.Tensor]:
     """
     Train a binary CAV classifier for a concept vs cached control embeddings.
@@ -270,15 +271,17 @@ def _train(
         precision, recall, fscore, support = precision_recall_fscore_support(
             l, y_preds, average="binary", pos_label=1
         )
-        logger.info("[%s] Accuracy: %.4f", name, acc)
+        #logger.info("[%s] Accuracy: %.4f", name, acc)
         (output_dir / f"classifier_perform_on_{name}.txt").write_text(
             f"Accuracy: {acc}\n"
         )
         return fscore
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    _eval(train_avs, train_l, "train")
+    train_fscore = _eval(train_avs, train_l, "train")
     test_fscore = _eval(test_avs, test_l, "test")
+
+    logger.info("Concept %s: [train] F-score: %.4f, [test] F-score: %.4f", name, train_fscore, test_fscore)
 
     weights = clf.weights
     assert len(weights.shape) == 2 and weights.shape[0] == 2
@@ -357,11 +360,11 @@ class CavTrainer:
                 pass
 
     @classmethod
-    def _reap_done_futures(cls, futures: list):
+    def _reap_done_futures(cls, futures: list, results: list):
         pending = []
         for name, fut, paths in futures:
             if fut.done():
-                fut.result()  # raises if worker failed
+                results.append((name, fut.result()))  # raises if worker failed
                 cls._cleanup_paths(paths)
             else:
                 pending.append((name, fut, paths))
@@ -371,11 +374,12 @@ class CavTrainer:
     def _wait_for_capacity(
         cls,
         futures: list,
+        results: list,
         capacity: int,
         sleep_s: int = 5,
     ):
         while True:
-            futures = cls._reap_done_futures(futures)
+            futures = cls._reap_done_futures(futures, results)
             if len(futures) < capacity:
                 return futures
             time.sleep(sleep_s)
@@ -418,7 +422,8 @@ class CavTrainer:
                     concept_dir,
                     self.penalty,
                     backend=backend,
-                    device=device
+                    device=device,
+                    name=c.name,
                 )
                 self.cav_fscores[c.name] = fscore
                 self.cav_weights[c.name] = weight
@@ -426,7 +431,7 @@ class CavTrainer:
 
                 self._cleanup_paths([str(concept_memmap_path)])
         else:
-            futures = []
+            futures = []; results = []
             ctx = mp.get_context("spawn")
             with ProcessPoolExecutor(mp_context=ctx, max_workers=num_processes) as executor:
                 for c in concept_list:
@@ -441,7 +446,7 @@ class CavTrainer:
 
                     # block the process to avoid too long queue
                     futures = self._wait_for_capacity(
-                        futures, capacity=(max_pending + num_processes), sleep_s=5
+                        futures, results, capacity=(max_pending + num_processes), sleep_s=5
                     )
 
                     future = executor.submit(
@@ -451,12 +456,12 @@ class CavTrainer:
                         concept_dir,
                         self.penalty,
                         backend=backend,
-                        device=device
+                        device=device,
+                        name=c.name,
                     )
                     logger.info("Submitted CAV training for concept %s", c.name)
                     futures.append((c.name, future, [str(concept_memmap_path)]))
 
-                results = []
                 for name, fut, paths in futures:
                     results.append((name, fut.result()))
                     self._cleanup_paths(paths)
@@ -504,7 +509,8 @@ class CavTrainer:
                     concept_dir,
                     self.penalty,
                     backend=backend,
-                    device=device
+                    device=device,
+                    name=c_test.name,
                 )
                 self.cav_fscores[c_test.name] = fscore
                 self.cav_weights[c_test.name] = weight
@@ -512,7 +518,7 @@ class CavTrainer:
 
                 self._cleanup_paths([str(concept_memmap_path), str(control_memmap_path)])
         else:
-            futures = []
+            futures = []; results = []
             with ProcessPoolExecutor(max_workers=num_processes) as executor:
                 for c_test, c_control in concept_pair_list:
                     concept_embeddings = self.tpcav.concept_embeddings(
@@ -531,7 +537,7 @@ class CavTrainer:
 
                     # block the process to avoid too long queue
                     futures = self._wait_for_capacity(
-                        futures, capacity=(max_pending + num_processes), sleep_s=5
+                        futures, results, capacity=(max_pending + num_processes), sleep_s=5
                     )
 
                     future = executor.submit(
@@ -541,7 +547,8 @@ class CavTrainer:
                         concept_dir,
                         self.penalty,
                         backend=backend,
-                        device=device
+                        device=device,
+                        name=c_test.name,
                     )
                     logger.info("Submitted CAV training for concept %s", c_test.name)
                     futures.append(
@@ -552,7 +559,6 @@ class CavTrainer:
                         )
                     )
 
-                results = []
                 for name, fut, paths in futures:
                     results.append((name, fut.result()))
                     self._cleanup_paths(paths)
