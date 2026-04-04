@@ -345,7 +345,7 @@ def generate_tpcav_html_report(
     # -----------------------------------------------------------------------------
     motif_logo_dict = _maybe_build_motif_logo_data_uris(
             motif_file if motif_file_fmt == "meme" else None,
-            selected_motif_concepts,
+            ranked_motif_concepts,
         )
     js_payload: dict[str, Any] = {
         "motif_file_fmt": motif_file_fmt,
