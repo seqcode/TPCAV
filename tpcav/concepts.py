@@ -33,6 +33,26 @@ class _PairedLoader:
             yield inputs
 
 
+class _SyntheticGCSeqIterator:
+    def __init__(self, seq_len: int, n: int, batch_size: int, gc: float, seed: int):
+        self.seq_len = int(seq_len)
+        self.n = int(n)
+        self.batch_size = int(batch_size)
+        self.gc = float(gc)
+        self.seed = int(seed)
+
+    def __iter__(self):
+        rng = np.random.RandomState(self.seed)
+        bases = np.array(["A", "C", "G", "T"], dtype="<U1")
+        p_at = (1.0 - self.gc) / 2.0
+        p_gc = self.gc / 2.0
+        p = [p_at, p_gc, p_gc, p_at]
+        for start in range(0, self.n, self.batch_size):
+            bs = min(self.batch_size, self.n - start)
+            arr = rng.choice(4, size=(bs, self.seq_len), p=p)
+            seqs = ["".join(bases[row]) for row in arr]
+            yield seqs
+
 def _construct_motif_concept_dataloader_from_control(
     control_seq_df: pd.DataFrame,
     genome_fasta: str,
@@ -144,6 +164,43 @@ class ConceptBuilder:
             batch_size=self.batch_size,
         )
         return chrom_iter
+
+    def add_synthetic_gc_content_concepts(self, gc_content_step=0.1):
+        """
+        Add a list of GC content concepts,
+        according to gc_content_step, example 0.1, GC content of each concept increases from 0.0 to 1.0 by the step
+        concept iter is basically the same as other add concept function, batch the generated input
+        """
+        step = float(gc_content_step)
+        if step <= 0 or step > 1:
+            raise ValueError("gc_content_step must be in (0, 1].")
+
+        # Include 1.0 endpoint (within floating tolerance).
+        gc_values = np.arange(0.0, 1.0 + 1e-9, step, dtype=float)
+
+        added: List[Concept] = []
+        for gc in gc_values:
+            gc = float(np.clip(gc, 0.0, 1.0))
+            concept_name = f"synthetic_gc_{gc:.2f}" + self.concept_name_suffix
+            seed = self.rng_seed + int(round(gc * 10000))
+            seq_iter = _SyntheticGCSeqIterator(
+                seq_len=self.input_window_length,
+                n=self.min_samples,
+                batch_size=self.batch_size,
+                gc=gc,
+                seed=seed,
+            )
+            concept = Concept(
+                id=self._reserve_id(),
+                name=concept_name,
+                data_iter=_PairedLoader(seq_iter, self._control_chrom_dl()),
+            )
+            self.concepts.append(concept)
+            added.append(concept)
+
+        self.metadata["synthetic_gc_content_step"] = step
+        self.metadata["synthetic_gc_content_values"] = gc_values.tolist()
+        return added
 
     def add_custom_motif_concepts(
         self, motif_table: str, control_regions: Optional[pd.DataFrame] = None, build_permute_control=True

@@ -877,6 +877,7 @@ def run_tpcav(
     motif_control_type="random",
     bed_seq_file: Optional[str] = None,
     bed_chrom_file: Optional[str] = None,
+    synthetic_gc_concept_step: Optional[float] = None,
     layer_name: Optional[str]=None,
     layer=None,
     output_dir: str = "tpcav/",
@@ -941,8 +942,8 @@ def run_tpcav(
         motif_concept_builders[nm] = builder
 
     ## bed concepts (optional)
-    if bed_seq_file is not None or bed_chrom_file is not None:
-        bed_builder = ConceptBuilder(
+    if bed_seq_file is not None or bed_chrom_file is not None or synthetic_gc_concept_step is not None:
+        non_motif_concept_builder = ConceptBuilder(
             genome_fasta=genome_fasta,
             input_window_length=input_window_length,
             bws=bws,
@@ -953,23 +954,26 @@ def run_tpcav(
             rng_seed = seed,
         )
         # use random regions as control
-        bed_builder.build_control()
+        non_motif_concept_builder.build_control()
         if bed_seq_file is not None:
             # build concepts from fasta sequences in bed file
-            bed_builder.add_bed_sequence_concepts(bed_seq_file)
+            non_motif_concept_builder.add_bed_sequence_concepts(bed_seq_file)
         if bed_chrom_file is not None:
             # build concepts from chromatin tracks in bed file
-            bed_builder.add_bed_chrom_concepts(bed_chrom_file)
+            non_motif_concept_builder.add_bed_chrom_concepts(bed_chrom_file)
+        if synthetic_gc_concept_step is not None:
+            # build synthetic gc content concepts
+            non_motif_concept_builder.add_synthetic_gc_content_concepts(synthetic_gc_concept_step)
         # apply transform to convert fasta sequences to one-hot encoded sequences
-        bed_builder.apply_transform(input_transform_func)
+        non_motif_concept_builder.apply_transform(input_transform_func)
     else:
-        bed_builder = None
+        non_motif_concept_builder = None
 
     # create TPCAV model on top of the given model
     tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
     # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
     tpcav_model.fit_pca(
-        concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + bed_builder.concepts_for_pca() if  bed_builder is not None else motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca(),
+        concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + non_motif_concept_builder.concepts_for_pca() if non_motif_concept_builder is not None else motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca(),
         num_samples_per_concept=num_samples_for_pca,
         num_pc=num_pc,
     )
@@ -993,13 +997,14 @@ def run_tpcav(
         if save_cav_trainer:
             torch.save(cav_trainer, str(output_path / f"cavs_{nm}_motifs/cav_trainer.pt"))
         motif_cav_trainers[nm] = cav_trainer
-    if bed_builder is not None:
+
+    if non_motif_concept_builder is not None:
         bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
         bed_cav_trainer.set_control(
-            bed_builder.control_concepts[0], num_samples=num_samples_for_cav
+            non_motif_concept_builder.control_concepts[0], num_samples=num_samples_for_cav
         )
         bed_cav_trainer.train_concepts(
-            bed_builder.concepts,
+            non_motif_concept_builder.concepts,
             num_samples_for_cav,
             output_dir=str(output_path / f"cavs_bed_concepts/"),
             num_processes=p,

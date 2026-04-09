@@ -115,6 +115,7 @@ class TPCAVTest(unittest.TestCase):
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
             bed_seq_file="data/hg38_rmsk.sample.bed",
+            synthetic_gc_concept_step=0.1,
             output_dir="data/test_run_tpcav_output/",
         )
 
@@ -234,13 +235,37 @@ class TPCAVTest(unittest.TestCase):
 
         cav_trainer.train_concepts_pairs(concepts_pairs, 200, output_dir="data/cavs_permute/", num_processes=2)
 
+    def test_synthetic_gc_content_concept(self):
+
+        builder = ConceptBuilder(
+            genome_fasta="data/hg38.analysisSet.fa",
+            input_window_length=1024,
+            bws=None,
+            num_motifs=12,
+            include_reverse_complement=True,
+            min_samples=1000,
+            batch_size=8,
+        )
+
+        builder.build_control()
+
+        builder.add_synthetic_gc_content_concepts(0.1)
+
+        for c in builder.concepts:
+            gc_content = float(c.name.split('_')[-1])
+            seq, _ = next(iter(c.data_iter))
+            total_c = 0.; gc_c = 0.
+            for s in seq:
+                total_c += len(s)
+                gc_c += s.count('G') + s.count('C')
+            assert (gc_c/total_c) - gc_content < 0.05
 
     def test_all(self):
-        lp = LineProfiler()
-                # Add installed-package functions you care about
-        lp.add_function(utils.iterate_seq_df_chunk)
-        lp.add_function(CavTrainer.train_concepts)
-        lp.enable_by_count()
+        #lp = LineProfiler()
+        #        # Add installed-package functions you care about
+        #lp.add_function(utils.iterate_seq_df_chunk)
+        #lp.add_function(CavTrainer.train_concepts)
+        #lp.enable_by_count()
 
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
         self.assertTrue(motif_path.exists(), "Motif file is missing")
@@ -258,6 +283,8 @@ class TPCAVTest(unittest.TestCase):
         builder.build_control()
 
         builder.add_meme_motif_concepts(str(motif_path))
+
+        builder.add_synthetic_gc_content_concepts(0.1)
 
         builder.apply_transform(transform_fasta_to_one_hot_seq)
 
@@ -370,7 +397,7 @@ class TPCAVTest(unittest.TestCase):
             f"Attributions do not match, max difference is {torch.abs(attributions - attributions_old).max()}",
         )
 
-        lp.disable_by_count()
+        #lp.disable_by_count()
         #lp.print_stats()
         
         # test save and restore states
