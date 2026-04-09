@@ -27,6 +27,7 @@ from sklearn.model_selection import GridSearchCV
 from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
+from packaging.version import Version
 import logomaker
 import multiprocessing as mp
 
@@ -808,9 +809,14 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
 
     def compute_auc_fscore(row):
         y = [row[f"fscore_{nm}_insertions"] for nm in num_motif_insertions]
-        return np.trapz(y, num_motif_insertions) / (
-            num_motif_insertions[-1] - num_motif_insertions[0]
-        )
+        if Version(np.__version__) < Version("2.0.0"): 
+            return np.trapz(y, num_motif_insertions) / (
+                num_motif_insertions[-1] - num_motif_insertions[0]
+            )
+        else:
+            return np.trapezoid(y, num_motif_insertions) / (
+                num_motif_insertions[-1] - num_motif_insertions[0]
+            )
 
     cavs_fscores_df["AUC_fscores"] = cavs_fscores_df.apply(compute_auc_fscore, axis=1)
 
