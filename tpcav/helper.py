@@ -3,15 +3,15 @@
 Lightweight data loading helpers for sequences and chromatin tracks.
 """
 
-from typing import Iterable, List, Optional
-
 import itertools
 import logging
-import pyBigWig
 import re
 import sys
+from typing import Iterable, List, Optional
+
 import numpy as np
 import pandas as pd
+import pyBigWig
 import seqchromloader as scl
 import torch
 from deeplift.dinuc_shuffle import dinuc_shuffle
@@ -112,6 +112,7 @@ def dataframe_to_chrom_tracks_iter(
     """
     Yield chromatin tracks for regions from a DataFrame using bigwig files.
     """
+    bigwigs = [scl.utils.BigWig(bw) for bw in bigwigs] if bigwigs is not None else None
     if bigwigs is not None and len(bigwigs) > 0:
         chrom_arrs = []
         for row in df.itertuples(index=False):
@@ -190,6 +191,7 @@ def dinuc_shuffle_sequences(
 
 def fasta_chrom_to_one_hot_seq(seq, chrom):
     return (fasta_to_one_hot_sequences(seq),)
+
 
 def write_attrs_to_bw(arrs, regions, genome_info, bigwig_fn, smooth=False):
     """
@@ -299,4 +301,3 @@ def write_attrs_to_bw(arrs, regions, genome_info, bigwig_fn, smooth=False):
                 print(arr_store_tmp.shape, print(arr.shape))
                 sys.exit(1)
     bw.close()
-
