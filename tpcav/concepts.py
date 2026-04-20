@@ -82,7 +82,7 @@ def _construct_motif_concept_dataloader_from_control(
         wds.RandomMix(datasets),
         batch_size=batch_size,
         num_workers=num_workers,
-        drop_last=False,
+        drop_last=True,
     )
     return mixed_dl
 

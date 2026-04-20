@@ -56,7 +56,7 @@ def bed_to_fasta_iter(
 
 
 def dataframe_to_fasta_iter(
-    df: pd.DataFrame, genome_fasta: str, batch_size: int
+    df: pd.DataFrame, genome_fasta: str, batch_size: int, drop_last=True
 ) -> Iterable[List[str]]:
     """
     Yield sequences from a DataFrame with columns [chrom, start, end].
@@ -73,7 +73,7 @@ def dataframe_to_fasta_iter(
         if len(fasta_seqs) == batch_size:
             yield fasta_seqs
             fasta_seqs = []
-    if fasta_seqs:
+    if fasta_seqs and not drop_last:
         yield fasta_seqs
 
 
@@ -108,6 +108,7 @@ def dataframe_to_chrom_tracks_iter(
     df: pd.DataFrame,
     bigwigs: Optional[List[str]],
     batch_size: int = 1,
+    drop_last=True
 ) -> Iterable[torch.Tensor]:
     """
     Yield chromatin tracks for regions from a DataFrame using bigwig files.
@@ -123,7 +124,7 @@ def dataframe_to_chrom_tracks_iter(
             if batch_size is not None and len(chrom_arrs) == batch_size:
                 yield torch.tensor(np.stack(chrom_arrs))
                 chrom_arrs = []
-        if chrom_arrs:
+        if chrom_arrs and not drop_last:
             yield torch.tensor(np.stack(chrom_arrs))
     else:
         while True:
