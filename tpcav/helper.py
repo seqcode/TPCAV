@@ -16,7 +16,7 @@ import seqchromloader as scl
 import torch
 from deeplift.dinuc_shuffle import dinuc_shuffle
 from pyfaidx import Fasta
-from seqchromloader.utils import dna2OneHot, extract_bw
+from seqchromloader.utils import dna2OneHot, extract_bw, BigWigInaccessible
 
 logger = logging.getLogger(__name__)
 
@@ -116,9 +116,13 @@ def dataframe_to_chrom_tracks_iter(
     if bigwigs is not None and len(bigwigs) > 0:
         chrom_arrs = []
         for row in df.itertuples(index=False):
-            chrom = extract_bw(
-                row.chrom, row.start, row.end, getattr(row, "strand", "+"), bigwigs
-            )
+            try:
+                chrom = extract_bw(
+                    row.chrom, row.start, row.end, getattr(row, "strand", "+"), bigwigs
+                )
+            except BigWigInaccessible as e:
+                logger.warning(e)
+                continue
             chrom_arrs.append(chrom)
             if batch_size is not None and len(chrom_arrs) == batch_size:
                 yield torch.tensor(np.stack(chrom_arrs))
