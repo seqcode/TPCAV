@@ -4,6 +4,7 @@ Copied utility helpers from scripts/utils.py so the package can run standalone.
 """
 
 import logging
+import tempfile
 from copy import deepcopy
 
 import Bio
@@ -12,7 +13,7 @@ import pandas as pd
 import pyfaidx
 import seqchromloader as scl
 import torch
-from Bio import SeqIO
+from Bio import SeqIO, motifs
 from pyfaidx import Fasta
 from torch.utils.data import default_collate, get_worker_info
 
@@ -632,3 +633,91 @@ class BioMotifWrapped:
 
     def sample_instance(self):
         return sample_from_pwm(self.pwm_prob_mat, rng=self.rng)
+
+def write_meme_v4(motifs_dict, output_file, background=0.25):
+    """
+    motifs_dict: {name: numpy array of shape (L, 4)} with columns order A, C, G, T
+    """
+    with open(output_file, "w") as f:
+        f.write("MEME version 4\n\n")
+        f.write("ALPHABET= ACGT\n\n")
+        f.write("strands: + -\n\n")
+        f.write(f"Background letter frequencies\n")
+        f.write(f"A {background} C {background} G {background} T {background}\n\n")
+
+        for name, pwm in motifs_dict.items():
+            npos = pwm.shape[0]
+            f.write(f"MOTIF {name}\n\n")
+            f.write(f"letter-probability matrix: alength= 4 w= {npos} nsites= 20 E= 0\n")
+            for row in pwm:
+                f.write(f"  {row[0]:.6f}  {row[1]:.6f}  {row[2]:.6f}  {row[3]:.6f}\n")
+            f.write("\n")
+
+def merge_meme_files(meme_files, background=0.25):
+    """
+    Merge multiple MEME v4 files into a single temporary MEME v4 file.
+    
+    Args:
+        meme_files: list of paths to MEME files
+        background: background frequency for each nucleotide
+    
+    Returns:
+        path to temporary merged MEME file
+    """
+    all_motifs = {}
+
+    for meme_file in meme_files:
+        with open(meme_file) as f:
+            meme = motifs.parse(f, fmt="minimal")
+        for motif in meme:
+            # convert biopython counts to probability numpy array (L, 4)
+            pwm = motif.pwm
+            arr = np.array([pwm[base] for base in "ACGT"]).T  # (L, 4)
+
+            # handle duplicate names
+            name = motif.name
+            unique_name = name
+            counter = 1
+            while unique_name in all_motifs:
+                unique_name = f"{name}_{counter}"
+                counter += 1
+            all_motifs[unique_name] = arr
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".meme",
+        delete=False
+    )
+    tmp_path = tmp.name
+    tmp.close()
+
+    write_meme_v4(all_motifs, tmp_path, background=background)
+
+    return tmp_path
+
+def merge_consensus_motif_files(motif_files):
+    """
+    Merge multiple text motif files by concatenation into a temporary file.
+    
+    Args:
+        motif_files: list of paths to text motif files
+    
+    Returns:
+        path to temporary merged text motif file
+    """
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".txt",
+        delete=False
+    )
+    tmp_path = tmp.name
+
+    with tmp:
+        for motif_file in motif_files:
+            with open(motif_file) as f:
+                content = f.read()
+            tmp.write(content)
+            if not content.endswith("\n"):
+                tmp.write("\n")
+
+    return tmp_path

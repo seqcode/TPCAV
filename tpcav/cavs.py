@@ -7,7 +7,7 @@ import logging
 import os
 import gc
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 import time
 
 from concurrent.futures import ProcessPoolExecutor
@@ -24,7 +24,6 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.model_selection import GridSearchCV
-from torch.utils.data import DataLoader, TensorDataset, random_split
 from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from packaging.version import Version
@@ -263,7 +262,6 @@ def _train(
         clf = _TorchLinearWrapper(input_dim= train_avs.shape[1], device=device)
     clf.fit(train_avs, train_l)
     
-    #breakpoint()
     def _eval(avs, l, name: str):
         
         y_preds = clf.predict(avs)
@@ -870,7 +868,7 @@ def compute_motif_auc_fscore(num_motif_insertions: List[int], cav_trainers: List
 
 def run_tpcav(
     model,
-    motif_file: str,
+    motif_file: Union[str, List[str]],
     genome_fasta: str,
     motif_file_fmt: str = 'meme',
     num_motif_insertions: List[int] = [4, 8, 16],
@@ -906,6 +904,13 @@ def run_tpcav(
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+
+    # merge motif files if there are multiple
+    if isinstance(motif_file, list):
+        if motif_file_fmt == 'meme':
+            motif_file = utils.merge_meme_files(motif_file)
+        else:
+            motif_file = utils.merge_consensus_motif_files(motif_file)
 
     output_path = Path(output_dir)
     # create concept builder to generate concepts

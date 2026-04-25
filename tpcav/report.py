@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Any, Mapping, Optional, Union
 
+from tpcav import utils
+
 def _read_as_data_uri(path: Path) -> str:
     mime, _ = mimetypes.guess_type(str(path))
     if mime is None:
@@ -96,7 +98,7 @@ def generate_tpcav_html_report(
     non_motif_cav_trainers: Optional[Mapping[str, Any]] = None,
     extra_cav_trainers: Optional[Mapping[str, Any]] = None,
     attributions: Optional[Union[Any, list[Any]]] = None,
-    motif_file: Optional[Union[str, Path]] = None,
+    motif_file: Optional[Union[str, Path, List[str]]] = None,
     motif_file_fmt: str = "meme",
     fscore_thresh: float = 0.8,
     top_motif_concepts: int = 10,
@@ -118,6 +120,13 @@ def generate_tpcav_html_report(
         title: Report title.
         embed_images: If True, embed PNGs as base64 data URIs; otherwise link to files.
     """
+    if isinstance(motif_file, list):
+        if motif_file_fmt == 'meme':
+            motif_file = utils.merge_meme_files(motif_file)
+        else:
+            motif_file = utils.merge_consensus_motif_files(motif_file)
+
+
     output_html_path = Path(output_html_path)
     assets_dir = output_html_path.parent / f"{output_html_path.stem}_assets"
     assets_dir.mkdir(parents=True, exist_ok=True)
