@@ -20,6 +20,10 @@ The same framework naturally extends to other domains, such as protein structure
 
 `pip install tpcav`
 
+Check [pyproject.toml](https://github.com/seqcode/TPCAV/tree/main/pyproject.toml) for dependencies
+
+> Installation time should be less than 10min
+
 ## Inputs
 
 - Required inputs:
@@ -57,7 +61,7 @@ For detailed usage for more flexibility on defining concepts, please refer to th
 
 Example usage on a simple model trained for predicting CTCF binding in MCF-7 cell line, you would need to download [hg38 genome](https://hgdownload.gi.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz) to run, other used files can be found in `data/` directory
 
-Here we test a couple of motif concepts (including CTCF cognate motif) and some sampled repeat concepts.
+Here we test a couple of motif concepts (including CTCF cognate motif) and some sampled repeat concepts, it should take less than 5min to run the demo.
 
 ```python
 import torch
