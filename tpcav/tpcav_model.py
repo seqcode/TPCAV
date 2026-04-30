@@ -17,6 +17,9 @@ def _abs_attribution_func(multipliers, inputs, baselines):
         for input_, baseline, multiplier in zip(inputs, baselines, multipliers)
     )
 
+class Untracked:
+    def __init__(self, module):
+        self.module = module
 
 class TPCAV(torch.nn.Module):
     """End-to-end PCA fitting, projection, and attribution utilities."""
@@ -39,10 +42,10 @@ class TPCAV(torch.nn.Module):
         self.model.eval()
         self.fitted = False
         if layer is not None:
-            self.layer = layer
+            self.layer = Untracked(layer)
             self.layer_name = ""
         elif layer_name is not None:
-            self.layer = self._resolve_layer(layer_name)
+            self.layer = Untracked(self._resolve_layer(layer_name))
             self.layer_name = layer_name
         else:
             raise Exception(
@@ -343,7 +346,7 @@ class TPCAV(torch.nn.Module):
         def hook_fn(_module, _inputs, output):
             cache.append(output)
 
-        handle = self.layer.register_forward_hook(hook_fn)
+        handle = self.layer.module.register_forward_hook(hook_fn)
         try:
             inputs = [inp.to(self.device) if inp is not None else inp for inp in inputs]
             _ = self.model(*inputs)
@@ -407,7 +410,7 @@ class TPCAV(torch.nn.Module):
                 y, cavs_list, mute_x_avs=mute_x_avs, mute_remainder=mute_remainder
             )
 
-        handle = self.layer.register_forward_hook(hook_fn)
+        handle = self.layer.module.register_forward_hook(hook_fn)
         try:
             output = self.model(*[i.to(self.device) for i in model_inputs])
         finally:
