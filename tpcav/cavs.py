@@ -49,67 +49,46 @@ class _TorchLinear(torch.nn.Module):
     def forward(self, avs):
         return self.linear(avs).squeeze(-1)
 
-    def shuffle_tensor(self, *tensors):
-        p = torch.randperm(len(tensors[0]))
-        
-        new_tensors = [t[p] for t in tensors]
-
-        return new_tensors
-    
-    def fit(self, train_avs: np.ndarray, train_ls: np.ndarray,
-            val_avs: np.ndarray, val_ls: np.ndarray,
+    def fit(self, train_loader, val_loader,
             patience=10, lr=1e-2, weight_decay=1e-2, max_epochs=1000):
 
         optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=weight_decay)
-        
-        best_loss = None
-        best_state_dict = None
-        epoch = 0
-        t = 0
+        best_loss = None; best_state_dict = None
+        epoch = 0; t = 0
+
         while True:
             epoch += 1
             if epoch > max_epochs: break
 
-            #shuffle the tensors before every epoch
-            train_avs, train_ls = self.shuffle_tensor(train_avs, train_ls)
-            
             self.train()
-            for i in range(0, len(train_avs), 32):
+            for avs, l in train_loader:
                 optimizer.zero_grad()
-
-                avs = torch.from_numpy(train_avs[i: (i+32)])
-                l = torch.from_numpy(train_ls[i: (i+32)])
-            
+                l_hinge = (l.float() * 2 - 1).to(self.device)  # 0→-1, 1→1
                 y_hat = self(avs.to(self.device))
-                loss = torch.mean(torch.clamp(1 - l.to(self.device) * y_hat, min=0))
-
+                loss = torch.mean(torch.clamp(1 - l_hinge * y_hat, min=0))
                 loss.backward()
                 optimizer.step()
 
             logger.debug(f"Training loss at epoch {epoch}: {loss}")
-            
+
             self.eval()
-            val_loss_all = []
-            for i in range(0, len(val_avs), 32):
-                avs = torch.from_numpy(val_avs[i: (i+32)])
-                l = torch.from_numpy(val_ls[i: (i+32)])
+            val_losses = []
+            with torch.no_grad():
+                for avs, l in val_loader:
+                    l_hinge = (l.float() * 2 - 1).to(self.device)
+                    y_hat = self(avs.to(self.device))
+                    val_losses.append(
+                        torch.mean(torch.clamp(1 - l_hinge * y_hat, min=0)).item()
+                    )
 
-                y_hat = self(avs.to(self.device))
-                val_loss = torch.mean(torch.clamp(1 - l.to(self.device) * y_hat, min=0))
-
-                val_loss_all.append(val_loss.item())
-
-            val_loss_all = np.mean(val_loss_all)
-
-            #logger.debug(f"Validation loss at epoch {epoch}: {val_loss_all}, patience {t} out of {patience}")
-
-            if (best_loss is None) or (val_loss_all < best_loss):
-                best_loss = val_loss_all
+            val_loss_mean = np.mean(val_losses)
+            if (best_loss is None) or (val_loss_mean < best_loss):
+                best_loss = val_loss_mean
                 best_state_dict = deepcopy(self.state_dict())
             else:
                 t += 1
                 if t >= patience: break
-        
+
         return best_state_dict, best_loss
 
 class _TorchLinearWrapper:
@@ -121,39 +100,28 @@ class _TorchLinearWrapper:
         self.weight_decay_search = weight_decay_search
         self.device = device
 
-    def fit(self, train_val_avs: np.ndarray, train_val_ls: np.ndarray):
-
-        train_avs, val_avs, train_ls, val_ls = train_test_split(train_val_avs, train_val_ls, test_size=0.1)
-        
+    def fit(self, train_loader, val_loader):
         best_state_dict = None; best_loss = None
         for w in self.weight_decay_search:
             model = _TorchLinear(self.input_dim, self.num_class, device=self.device).to(self.device)
-            state_dict, loss = model.fit(train_avs, train_ls, val_avs, val_ls, lr=self.lr, weight_decay=w)
+            state_dict, loss = model.fit(train_loader, val_loader, lr=self.lr, weight_decay=w)
             if (best_loss is None) or (loss < best_loss):
-                best_loss = loss
-                best_state_dict = state_dict
+                best_loss = loss; best_state_dict = state_dict
+            del model; gc.collect(); torch.cuda.empty_cache()
 
-            del model
-            gc.collect()
-            torch.cuda.empty_cache()
-            
         self.best_model = _TorchLinear(self.input_dim, self.num_class)
         self.best_model.load_state_dict(best_state_dict)
         self.best_model.to(self.device)
 
     def predict(self, avs: np.ndarray, batch_size=128):
-        
         self.best_model.eval()
         y_hats = []
-        for i in range(0, len(avs), batch_size):
-            batch = torch.from_numpy(avs[i:i+batch_size]).to(self.device)
-            y_hats.append(self.best_model(batch).detach().cpu())
+        with torch.no_grad():
+            for i in range(0, len(avs), batch_size):
+                batch = torch.from_numpy(avs[i:i+batch_size]).to(self.device)
+                y_hats.append(self.best_model(batch).cpu())
         y_hats = torch.cat(y_hats, dim=0)
-
-        y_hats[y_hats>=0] = 1
-        y_hats[y_hats<0] = -1
-
-        return y_hats.numpy()
+        return (y_hats >= 0).long().numpy()
     
     @property
     def weights(self):
@@ -208,34 +176,80 @@ class _SGDWrapper:
     def predict(self, x: np.ndarray) -> np.ndarray:
         return self.lm.predict(x)
 
-def prepare_xy(concept_embeddings, control_embeddings, seed=42):
-    def _to_numpy(emb):
-        return np.load(str(emb), mmap_mode="r")
+def prepare_split(concept_path, control_path, seed=42, test_size=0.1, val_size=0.1):
+    """Compute train/val/test index splits without materializing embeddings.
 
-    # move to CPU + numpy, just double confirm
-    concept = _to_numpy(concept_embeddings)
-    control = _to_numpy(control_embeddings)
+    Indices address a virtual array of [concept_rows..., control_rows...].
+    Returns (train_idx, val_idx, test_idx, n_concept).
+    """
+    n_concept = len(np.load(str(concept_path), mmap_mode="r"))
+    n_control = len(np.load(str(control_path), mmap_mode="r"))
 
-    # labels
-    y_concept = np.zeros(len(concept), dtype=np.int64)
-    y_control = np.ones(len(control), dtype=np.int64)
+    y = np.concatenate([np.zeros(n_concept), np.ones(n_control)]).astype(int)
+    all_idx = np.arange(n_concept + n_control)
 
-    # combine
-    X = np.concatenate([concept, control], axis=0)
-    y = np.concatenate([y_concept, y_control], axis=0)
-
-    # flatten if needed (SGDClassifier expects 2D)
-    X = X.reshape(X.shape[0], -1)
-
-    # split: train vs temp (val+test)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=0.1,
-        random_state=seed,
-        stratify=y,   # keeps class balance
+    train_val_idx, test_idx = train_test_split(
+        all_idx, test_size=test_size, stratify=y, random_state=seed
     )
+    train_idx, val_idx = train_test_split(
+        train_val_idx,
+        test_size=val_size / (1 - test_size),
+        stratify=y[train_val_idx],
+        random_state=seed,
+    )
+    return train_idx, val_idx, test_idx, n_concept
 
-    return X_train, y_train, X_test, y_test
+
+def _load_subset(concept_path, control_path, idx, n_concept):
+    """Materialize a subset of embeddings as a numpy array.
+
+    concept embeddings → label 0, control embeddings → label 1.
+    """
+    concept = np.load(str(concept_path), mmap_mode="r")
+    control = np.load(str(control_path), mmap_mode="r")
+    feat_dim = int(np.prod(concept.shape[1:]))
+    concept = concept.reshape(len(concept), feat_dim)
+    control = control.reshape(len(control), feat_dim)
+
+    mask = idx < n_concept
+    X = np.empty((len(idx), feat_dim), dtype=concept.dtype)
+    if mask.any():
+        X[mask] = concept[idx[mask]]
+    if (~mask).any():
+        X[~mask] = control[idx[~mask] - n_concept]
+
+    y = np.where(mask, 0, 1).astype(np.int64)
+    return X, y
+
+
+class EmbeddingDataset(torch.utils.data.Dataset):
+    """Lazy dataset backed by two memmap .npy files.
+
+    concept embeddings → label 0, control embeddings → label 1.
+    Only the requested rows are read from disk per __getitem__ call.
+    """
+
+    def __init__(self, concept_path: str, control_path: str, idx: np.ndarray, n_concept: int):
+        concept = np.load(str(concept_path), mmap_mode="r")
+        control = np.load(str(control_path), mmap_mode="r")
+        feat_dim = int(np.prod(concept.shape[1:]))
+        self._concept   = concept.reshape(len(concept), feat_dim)
+        self._control   = control.reshape(len(control), feat_dim)
+        self._idx       = idx
+        self._n_concept = n_concept
+
+    def __len__(self):
+        return len(self._idx)
+
+    def __getitem__(self, i):
+        global_idx = self._idx[i]
+        if global_idx < self._n_concept:
+            x = self._concept[global_idx].copy()
+            y = 0
+        else:
+            x = self._control[global_idx - self._n_concept].copy()
+            y = 1
+        return torch.from_numpy(x).float(), torch.tensor(y, dtype=torch.long)
 
 def _train(
     concept_embeddings: str,
@@ -246,46 +260,51 @@ def _train(
     device=None,
     name=None,
 ) -> Tuple[float, torch.Tensor]:
-    """
-    Train a binary CAV classifier for a concept vs cached control embeddings.
-
-    Requires set_control to have been called beforehand.
-    """
+    """Train a binary CAV classifier for a concept vs cached control embeddings."""
     assert backend in ["sklearn", "torch"], "Backend has to be either sklearn or torch!"
 
     output_dir = Path(output_dir)
-    
-    train_avs, train_l, test_avs, test_l = prepare_xy(concept_embeddings, control_embeddings)
-    
-    if backend == "sklearn":
-        clf = _SGDWrapper(penalty=penalty)
-    else:
-        # replace label 0 as -1 to accomodate hinge loss
-        train_l[train_l==0] = -1
-        test_l[test_l==0] = -1
-        
-        device = device or ('cuda:0' if torch.cuda.is_available else 'cpu')
-        clf = _TorchLinearWrapper(input_dim= train_avs.shape[1], device=device)
-    clf.fit(train_avs, train_l)
-    
-    def _eval(avs, l, name: str):
-        
-        y_preds = clf.predict(avs)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        acc = (y_preds == l).sum() / len(l)
-        precision, recall, fscore, support = precision_recall_fscore_support(
-            l, y_preds, average="binary", pos_label=1
+    train_idx, val_idx, test_idx, n_concept = prepare_split(concept_embeddings, control_embeddings)
+
+    if backend == "sklearn":
+        X_train, y_train = _load_subset(concept_embeddings, control_embeddings, train_idx, n_concept)
+        X_test,  y_test  = _load_subset(concept_embeddings, control_embeddings, test_idx,  n_concept)
+        clf = _SGDWrapper(penalty=penalty)
+        clf.fit(X_train, y_train)
+    else:
+        concept_mmap = np.load(str(concept_embeddings), mmap_mode="r")
+        feat_dim = int(np.prod(concept_mmap.shape[1:]))
+        del concept_mmap
+
+        device = device or ('cuda:0' if torch.cuda.is_available() else 'cpu')
+        pin = torch.cuda.is_available()
+
+        train_ds = EmbeddingDataset(concept_embeddings, control_embeddings, train_idx, n_concept)
+        val_ds   = EmbeddingDataset(concept_embeddings, control_embeddings, val_idx,   n_concept)
+        train_loader = torch.utils.data.DataLoader(train_ds, batch_size=32, shuffle=True,  pin_memory=pin, num_workers=0)
+        val_loader   = torch.utils.data.DataLoader(val_ds,   batch_size=32, shuffle=False, pin_memory=pin, num_workers=0)
+
+        clf = _TorchLinearWrapper(input_dim=feat_dim, device=device)
+        clf.fit(train_loader, val_loader)
+
+        X_train, y_train = _load_subset(concept_embeddings, control_embeddings, train_idx, n_concept)
+        X_test,  y_test  = _load_subset(concept_embeddings, control_embeddings, test_idx,  n_concept)
+
+    def _eval(X, y, split_name: str):
+        y_preds = clf.predict(X)
+        acc = (y_preds == y).sum() / len(y)
+        _, _, fscore, _ = precision_recall_fscore_support(
+            y, y_preds, average="binary", pos_label=1
         )
-        #logger.info("[%s] Accuracy: %.4f", name, acc)
-        (output_dir / f"classifier_perform_on_{name}.txt").write_text(
+        (output_dir / f"classifier_perform_on_{split_name}.txt").write_text(
             f"Accuracy: {acc}\n"
         )
         return fscore
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-    train_fscore = _eval(train_avs, train_l, "train")
-    test_fscore = _eval(test_avs, test_l, "test")
-
+    train_fscore = _eval(X_train, y_train, "train")
+    test_fscore  = _eval(X_test,  y_test,  "test")
     logger.info("Concept %s: [train] F-score: %.4f, [test] F-score: %.4f", name, train_fscore, test_fscore)
 
     weights = clf.weights
@@ -293,7 +312,6 @@ def _train(
     torch.save(weights, output_dir / "classifier_weights.pt")
 
     if backend == 'torch':
-        # release gpu memroy
         del clf.best_model
         gc.collect()
         torch.cuda.empty_cache()
