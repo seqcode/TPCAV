@@ -299,6 +299,13 @@ class TPCAVTest(unittest.TestCase):
             concepts=builder.concepts_for_pca(),
             num_samples_per_concept=10,
             num_pc="full",
+            backend='pca',
+        )
+        tpcav_model.fit_pca(
+            concepts=builder.concepts_for_pca(),
+            num_samples_per_concept=10,
+            num_pc="full",
+            backend='decorr',
         )
         torch.save(tpcav_model, "data/tmp_tpcav_model.pt")
 
