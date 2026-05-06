@@ -141,13 +141,19 @@ class _TorchLinearWrapper:
         self.best_model.load_state_dict(best_state_dict)
         self.best_model.to(self.device)
 
-    def predict(self, avs: np.ndarray):
-        y_hat = self.best_model(torch.from_numpy(avs).to(self.device))
+    def predict(self, avs: np.ndarray, batch_size=128):
+        
+        self.best_model.eval()
+        y_hats = []
+        for i in range(0, len(avs), batch_size):
+            batch = torch.from_numpy(avs[i:i+batch_size]).to(self.device)
+            y_hats.append(self.best_model(batch).detach().cpu())
+        y_hats = torch.cat(y_hats, dim=0)
 
-        y_hat[y_hat>=0] = 1
-        y_hat[y_hat<0] = -1
+        y_hats[y_hats>=0] = 1
+        y_hats[y_hats<0] = -1
 
-        return y_hat.detach().cpu().numpy()
+        return y_hats.numpy()
     
     @property
     def weights(self):
