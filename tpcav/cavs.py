@@ -19,7 +19,6 @@ import seaborn as sns
 import torch
 from copy import deepcopy
 from scipy import stats
-import uuid
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import precision_recall_fscore_support
 from sklearn.metrics.pairwise import cosine_similarity
@@ -176,14 +175,18 @@ class _SGDWrapper:
     def predict(self, x: np.ndarray) -> np.ndarray:
         return self.lm.predict(x)
 
-def prepare_split(concept_path, control_path, seed=42, test_size=0.1, val_size=0.1):
+def prepare_split(concept_path, control_path, seed=42, test_size=0.1, val_size=0.1, max_samples=None):
     """Compute train/val/test index splits without materializing embeddings.
 
     Indices address a virtual array of [concept_rows..., control_rows...].
+    max_samples caps both concept and control independently.
     Returns (train_idx, val_idx, test_idx, n_concept).
     """
     n_concept = len(np.load(str(concept_path), mmap_mode="r"))
     n_control = len(np.load(str(control_path), mmap_mode="r"))
+    if max_samples is not None:
+        n_concept = min(n_concept, max_samples)
+        n_control = min(n_control, max_samples)
 
     y = np.concatenate([np.zeros(n_concept), np.ones(n_control)]).astype(int)
     all_idx = np.arange(n_concept + n_control)
@@ -259,6 +262,7 @@ def _train(
     backend: str = "sklearn",
     device=None,
     name=None,
+    max_samples=None,
 ) -> Tuple[float, torch.Tensor]:
     """Train a binary CAV classifier for a concept vs cached control embeddings."""
     assert backend in ["sklearn", "torch"], "Backend has to be either sklearn or torch!"
@@ -266,7 +270,9 @@ def _train(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    train_idx, val_idx, test_idx, n_concept = prepare_split(concept_embeddings, control_embeddings)
+    train_idx, val_idx, test_idx, n_concept = prepare_split(
+        concept_embeddings, control_embeddings, max_samples=max_samples
+    )
 
     if backend == "sklearn":
         X_train, y_train = _load_subset(concept_embeddings, control_embeddings, train_idx, n_concept)
@@ -327,46 +333,33 @@ class CavTrainer:
         self.penalty = penalty
         self.cav_fscores = {}
         self.cav_weights = {}
-        self.control_embeddings: Optional[torch.Tensor] = None
+        self.control = None
         self.cavs_list: List[torch.Tensor] = []
 
     def save_state(self, output_path: str = "cav_trainer_state.pt"):
-        """
-        Save CavTrainer state to a file.
-        """
+        """Save CavTrainer state to a file."""
         state = {
             "penalty": self.penalty,
             "cav_fscores": self.cav_fscores,
             "cav_weights": self.cav_weights,
-            "control_embeddings": self.control_embeddings,
             "cavs_list": self.cavs_list,
         }
         torch.save(state, output_path)
-    
+
     @staticmethod
     def load_state(tpcav_model: TPCAV, state_path: str = "cav_trainer_state.pt"):
-        """
-        Restore CavTrainer state from a file.
-        """
+        """Restore CavTrainer state from a file."""
         state = torch.load(state_path, map_location="cpu")
         cav_trainer = CavTrainer(tpcav_model, penalty=state["penalty"])
-
         cav_trainer.cav_fscores = state["cav_fscores"]
         cav_trainer.cav_weights = state["cav_weights"]
-        cav_trainer.control_embeddings = state["control_embeddings"]
         cav_trainer.cavs_list = state["cavs_list"]
-
         logger.info("Successfully restored cav trainer states!")
         return cav_trainer
 
-    def set_control(self, control_concept, num_samples: int) -> torch.Tensor:
-        """
-        Set and cache control embeddings to avoid recomputation across CAV trainings.
-        """
-        self.control_embeddings = self.tpcav.concept_embeddings(
-            control_concept, num_samples=num_samples
-        )
-        return self.control_embeddings
+    def set_control(self, control_concept) -> None:
+        """Set the control concept; embeddings are computed lazily when training starts."""
+        self.control = control_concept
 
     @staticmethod
     def _save_tensor_npy(path: Path, tensor: torch.Tensor) -> str:
@@ -418,30 +411,30 @@ class CavTrainer:
         device=None
     ):
         "Train concepts with a fixed control set by self.set_control()"
-        if self.control_embeddings is None:
-            raise ValueError(
-                "Call set_control(control_concept, num_samples=...) before training CAVs."
-            )
-        else:
-            self.control_embeddings = self.control_embeddings.cpu()
+        if self.control is None:
+            raise ValueError("Call set_control(control_concept) before training CAVs.")
 
         output_dir_path = Path(output_dir)
         output_dir_path.mkdir(parents=True, exist_ok=True)
-        control_memmap_path = output_dir_path / f"_control_embeddings_{uuid.uuid4().hex}.npy"
-        self._save_tensor_npy(control_memmap_path, self.control_embeddings)
+
+        # Project control embeddings once and save to disk.
+        control_proj_path = output_dir_path / "_control_projected.npy"
+        ctrl_emb = self.tpcav.concept_embeddings(self.control, num_samples)
+        np.save(str(control_proj_path), ctrl_emb.numpy())
+        del ctrl_emb
 
         if num_processes == 1:
             for c in concept_list:
-                concept_embeddings = self.tpcav.concept_embeddings(
-                    c, num_samples=num_samples
-                )
                 concept_dir = output_dir_path / c.name
                 concept_dir.mkdir(parents=True, exist_ok=True)
-                concept_memmap_path = concept_dir / "concept_embeddings.npy"
-                self._save_tensor_npy(concept_memmap_path, concept_embeddings)
+                concept_proj_path = concept_dir / "concept_projected.npy"
+                c_emb = self.tpcav.concept_embeddings(c, num_samples)
+                np.save(str(concept_proj_path), c_emb.numpy())
+                del c_emb
+
                 fscore, weight = _train(
-                    str(concept_memmap_path),
-                    str(control_memmap_path),
+                    str(concept_proj_path),
+                    str(control_proj_path),
                     concept_dir,
                     self.penalty,
                     backend=backend,
@@ -451,31 +444,27 @@ class CavTrainer:
                 self.cav_fscores[c.name] = fscore
                 self.cav_weights[c.name] = weight
                 self.cavs_list.append(weight)
-
-                self._cleanup_paths([str(concept_memmap_path)])
+                self._cleanup_paths([str(concept_proj_path)])
         else:
             futures = []; results = []
             ctx = mp.get_context("spawn")
             with ProcessPoolExecutor(mp_context=ctx, max_workers=num_processes) as executor:
                 for c in concept_list:
-                    concept_embeddings = self.tpcav.concept_embeddings(
-                        c, num_samples=num_samples
-                    )
-
                     concept_dir = output_dir_path / c.name
                     concept_dir.mkdir(parents=True, exist_ok=True)
-                    concept_memmap_path = concept_dir / "concept_embeddings.npy"
-                    self._save_tensor_npy(concept_memmap_path, concept_embeddings)
+                    concept_proj_path = concept_dir / "concept_projected.npy"
+                    c_emb = self.tpcav.concept_embeddings(c, num_samples)
+                    np.save(str(concept_proj_path), c_emb.numpy())
+                    del c_emb
 
-                    # block the process to avoid too long queue
                     futures = self._wait_for_capacity(
                         futures, results, capacity=(max_pending + num_processes), sleep_s=5
                     )
 
                     future = executor.submit(
                         _train,
-                        str(concept_memmap_path),
-                        str(control_memmap_path),
+                        str(concept_proj_path),
+                        str(control_proj_path),
                         concept_dir,
                         self.penalty,
                         backend=backend,
@@ -483,7 +472,7 @@ class CavTrainer:
                         name=c.name,
                     )
                     logger.info("Submitted CAV training for concept %s", c.name)
-                    futures.append((c.name, future, [str(concept_memmap_path)]))
+                    futures.append((c.name, future, [str(concept_proj_path)]))
 
                 for name, fut, paths in futures:
                     results.append((name, fut.result()))
@@ -493,7 +482,7 @@ class CavTrainer:
                 self.cav_weights[name] = weight
                 self.cavs_list.append(weight)
 
-        self._cleanup_paths([str(control_memmap_path)])
+        self._cleanup_paths([str(control_proj_path)])
 
     def train_concepts_pairs(self,
                              concept_pair_list,
@@ -512,23 +501,21 @@ class CavTrainer:
 
         if num_processes == 1:
             for c_test, c_control in concept_pair_list:
-                concept_embeddings = self.tpcav.concept_embeddings(
-                    c_test, num_samples=num_samples
-                )
-                control_embeddings = self.tpcav.concept_embeddings(
-                    c_control, num_samples=num_samples
-                )
-
                 concept_dir = output_dir_path / c_test.name
                 concept_dir.mkdir(parents=True, exist_ok=True)
-                concept_memmap_path = concept_dir / "concept_embeddings.npy"
-                control_memmap_path = concept_dir / "control_embeddings.npy"
-                self._save_tensor_npy(concept_memmap_path, concept_embeddings)
-                self._save_tensor_npy(control_memmap_path, control_embeddings)
+                concept_proj_path = concept_dir / "concept_projected.npy"
+                control_proj_path = concept_dir / "control_projected.npy"
+
+                c_emb = self.tpcav.concept_embeddings(c_test, num_samples)
+                np.save(str(concept_proj_path), c_emb.numpy())
+                del c_emb
+                ctrl_emb = self.tpcav.concept_embeddings(c_control, num_samples)
+                np.save(str(control_proj_path), ctrl_emb.numpy())
+                del ctrl_emb
 
                 fscore, weight = _train(
-                    str(concept_memmap_path),
-                    str(control_memmap_path),
+                    str(concept_proj_path),
+                    str(control_proj_path),
                     concept_dir,
                     self.penalty,
                     backend=backend,
@@ -538,35 +525,32 @@ class CavTrainer:
                 self.cav_fscores[c_test.name] = fscore
                 self.cav_weights[c_test.name] = weight
                 self.cavs_list.append(weight)
-
-                self._cleanup_paths([str(concept_memmap_path), str(control_memmap_path)])
+                self._cleanup_paths([str(concept_proj_path), str(control_proj_path)])
         else:
             futures = []; results = []
-            with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            ctx = mp.get_context("spawn")
+            with ProcessPoolExecutor(mp_context=ctx, max_workers=num_processes) as executor:
                 for c_test, c_control in concept_pair_list:
-                    concept_embeddings = self.tpcav.concept_embeddings(
-                        c_test, num_samples=num_samples
-                    )
-                    control_embeddings = self.tpcav.concept_embeddings(
-                        c_control, num_samples=num_samples
-                    )
-
                     concept_dir = output_dir_path / c_test.name
                     concept_dir.mkdir(parents=True, exist_ok=True)
-                    concept_memmap_path = concept_dir / "concept_embeddings.npy"
-                    control_memmap_path = concept_dir / "control_embeddings.npy"
-                    self._save_tensor_npy(concept_memmap_path, concept_embeddings)
-                    self._save_tensor_npy(control_memmap_path, control_embeddings)
+                    concept_proj_path = concept_dir / "concept_projected.npy"
+                    control_proj_path = concept_dir / "control_projected.npy"
 
-                    # block the process to avoid too long queue
+                    c_emb = self.tpcav.concept_embeddings(c_test, num_samples)
+                    np.save(str(concept_proj_path), c_emb.numpy())
+                    del c_emb
+                    ctrl_emb = self.tpcav.concept_embeddings(c_control, num_samples)
+                    np.save(str(control_proj_path), ctrl_emb.numpy())
+                    del ctrl_emb
+
                     futures = self._wait_for_capacity(
                         futures, results, capacity=(max_pending + num_processes), sleep_s=5
                     )
 
                     future = executor.submit(
                         _train,
-                        str(concept_memmap_path),
-                        str(control_memmap_path),
+                        str(concept_proj_path),
+                        str(control_proj_path),
                         concept_dir,
                         self.penalty,
                         backend=backend,
@@ -574,13 +558,7 @@ class CavTrainer:
                         name=c_test.name,
                     )
                     logger.info("Submitted CAV training for concept %s", c_test.name)
-                    futures.append(
-                        (
-                            c_test.name,
-                            future,
-                            [str(concept_memmap_path), str(control_memmap_path)],
-                        )
-                    )
+                    futures.append((c_test.name, future, [str(concept_proj_path), str(control_proj_path)]))
 
                 for name, fut, paths in futures:
                     results.append((name, fut.result()))
@@ -906,12 +884,11 @@ def run_tpcav(
     num_samples_for_pca=10,
     num_samples_for_cav=1000,
     input_window_length=1024,
-    batch_size=8,
     num_workers=0,
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
     num_pc: Union[str,int]='full',
-    p=1, 
+    p=1,
     max_pending_jobs=4,
     save_cav_trainer=True,
     generate_html_report=True,
@@ -919,6 +896,7 @@ def run_tpcav(
     seed=1001,
     backend='sklearn',
     device=None,
+    cache_dir: Optional[str] = "tpcav_cache/",
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -950,9 +928,9 @@ def run_tpcav(
             num_motifs=nm,
             include_reverse_complement=True,
             min_samples=num_samples_for_cav,
-            batch_size=batch_size,
             num_workers=num_workers,
-            rng_seed = seed,
+            rng_seed=seed,
+            cache_dir=cache_dir,
         )
         # use random regions as control
         builder.build_control()
@@ -979,8 +957,8 @@ def run_tpcav(
             num_motifs=0,
             include_reverse_complement=True,
             min_samples=num_samples_for_cav,
-            batch_size=batch_size,
-            rng_seed = seed,
+            rng_seed=seed,
+            cache_dir=cache_dir,
         )
         # use random regions as control
         non_motif_concept_builder.build_control()
@@ -1018,7 +996,7 @@ def run_tpcav(
                                              output_dir=str(output_path / f"cavs_{nm}_motifs/"),
                                              num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device)
         else:
-            cav_trainer.set_control(motif_concept_builders[nm].control_concepts[0], num_samples=num_samples_for_cav)
+            cav_trainer.set_control(motif_concept_builders[nm].control_concepts[0])
             cav_trainer.train_concepts([c for c, _ in motif_concepts_pairs[nm]],
                                         num_samples_for_cav,
                                         output_dir=str(output_path / f"cavs_{nm}_motifs/"),
@@ -1029,9 +1007,7 @@ def run_tpcav(
 
     if non_motif_concept_builder is not None:
         bed_cav_trainer = CavTrainer(tpcav_model, penalty="l2")
-        bed_cav_trainer.set_control(
-            non_motif_concept_builder.control_concepts[0], num_samples=num_samples_for_cav
-        )
+        bed_cav_trainer.set_control(non_motif_concept_builder.control_concepts[0])
         bed_cav_trainer.train_concepts(
             non_motif_concept_builder.concepts,
             num_samples_for_cav,

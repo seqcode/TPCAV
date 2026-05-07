@@ -1,22 +1,91 @@
 import logging
+import tempfile
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import pyfaidx
 import seqchromloader as scl
+import torch
 import webdataset as wds
 from Bio import motifs as Bio_motifs
-from captum.concept import Concept
 from torch.utils.data import DataLoader
 
 from . import helper, utils
 
 logger = logging.getLogger(__name__)
 
+_INTERNAL_BATCH_SIZE = 32
+
+
+class Concept:
+    """Concept with optional disk-based activation caching.
+
+    data_iter must yield one sample at a time as a tuple of tensors.
+    Call get_embeddings(tpcav_model) to compute and cache raw layer activations.
+    """
+
+    def __init__(
+        self,
+        id: int,
+        name: str,
+        data_iter: Iterable,
+        cache_dir: Optional[str] = None,
+    ) -> None:
+        self.id = id
+        self.name = name
+        self.data_iter = data_iter
+        self.cache_dir = cache_dir
+        self.embedding_path: Optional[str] = None
+
+    def get_embeddings(self, tpcav_model, num_samples: Optional[int] = None) -> np.ndarray:
+        """Compute and cache ALL raw layer activations to disk.
+
+        Returns a lazy-loaded numpy array (mmap) sliced to num_samples.
+        If a cached file already exists it is returned without recomputation.
+        If cache_dir is not set a temporary file is used (not reused across calls).
+        """
+        if self.cache_dir is not None:
+            save_path = Path(self.cache_dir) / f"{self.name}_activations.npy"
+            if save_path.exists():
+                self.embedding_path = str(save_path)
+                arr = np.load(str(save_path), mmap_mode="r")
+                return arr[:num_samples] if num_samples is not None else arr
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            tmp = tempfile.NamedTemporaryFile(suffix=".npy", delete=False)
+            save_path = Path(tmp.name)
+            tmp.close()
+
+        tpcav_model.model.eval()
+        all_batches: List[np.ndarray] = []
+
+        for inputs in self.data_iter:
+            with torch.no_grad():
+                av = tpcav_model._layer_output(
+                    *[t.to(tpcav_model.device) if t is not None else t for t in inputs]
+                ).detach().cpu().numpy()
+            all_batches.append(av)
+
+        if not all_batches:
+            raise ValueError(f"No activations gathered for concept {self.name}")
+
+        embeddings = np.concatenate(all_batches, axis=0)
+        np.save(str(save_path), embeddings)
+        self.embedding_path = str(save_path)
+        logger.info(
+            "Saved %d activations for concept %s to %s",
+            len(embeddings),
+            self.name,
+            save_path,
+        )
+        arr = np.load(str(save_path), mmap_mode="r")
+        return arr[:num_samples] if num_samples is not None else arr
+
 
 class _PairedLoader:
-    """Allow repeated iteration over paired dataloaders."""
+    """Iterate over paired dataloaders, yielding one sample at a time."""
 
     def __init__(self, seq_dl: Iterable, chrom_dl: Iterable) -> None:
         self.seq_dl = seq_dl
@@ -34,10 +103,9 @@ class _PairedLoader:
 
 
 class _SyntheticGCSeqIterator:
-    def __init__(self, seq_len: int, n: int, batch_size: int, gc: float, seed: int):
+    def __init__(self, seq_len: int, n: int, gc: float, seed: int):
         self.seq_len = int(seq_len)
         self.n = int(n)
-        self.batch_size = int(batch_size)
         self.gc = float(gc)
         self.seed = int(seed)
 
@@ -47,8 +115,8 @@ class _SyntheticGCSeqIterator:
         p_at = (1.0 - self.gc) / 2.0
         p_gc = self.gc / 2.0
         p = [p_at, p_gc, p_gc, p_at]
-        for start in range(0, self.n, self.batch_size):
-            bs = min(self.batch_size, self.n - start)
+        for start in range(0, self.n, _INTERNAL_BATCH_SIZE):
+            bs = min(_INTERNAL_BATCH_SIZE, self.n - start)
             arr = rng.choice(4, size=(bs, self.seq_len), p=p)
             seqs = ["".join(bases[row]) for row in arr]
             yield seqs
@@ -58,7 +126,6 @@ def _construct_motif_concept_dataloader_from_control(
     genome_fasta: str,
     motifs: Sequence,
     num_motifs: int,
-    batch_size: int,
     num_workers: int,
     start_buffer=0,
     end_buffer=0
@@ -80,7 +147,7 @@ def _construct_motif_concept_dataloader_from_control(
 
     mixed_dl = DataLoader(
         wds.RandomMix(datasets),
-        batch_size=batch_size,
+        batch_size=_INTERNAL_BATCH_SIZE,
         num_workers=num_workers,
         drop_last=True,
     )
@@ -95,13 +162,13 @@ class ConceptBuilder:
         genome_fasta: str,
         input_window_length: int = 1024,
         bws: Optional[List[str]] = None,
-        batch_size: int = 8,
         num_workers: int = 0,
         num_motifs: int = 12,
         include_reverse_complement: bool = False,
         min_samples: int = 5000,
         rng_seed: int = 1001,
         concept_name_suffix: str = "",
+        cache_dir: Optional[str] = "tpcav_cache/",
     ) -> None:
         self.genome_fasta = genome_fasta
         pyfaidx.Fasta(
@@ -110,13 +177,13 @@ class ConceptBuilder:
         self.genome_size_file = self.genome_fasta + ".fai"
         self.input_window_length = input_window_length
         self.bws = bws or []
-        self.batch_size = batch_size
         self.num_workers = num_workers
         self.num_motifs = num_motifs
         self.include_reverse_complement = include_reverse_complement
         self.min_samples = min_samples
         self.rng_seed = rng_seed
         self.concept_name_suffix = concept_name_suffix
+        self.cache_dir = cache_dir
 
         self.control_regions = None
         self.control_concepts: List[Concept] = []
@@ -142,6 +209,7 @@ class ConceptBuilder:
             id=self._reserve_id(is_control=True),
             name=name + self.concept_name_suffix,
             data_iter=_PairedLoader(self._control_seq_dl(), self._control_chrom_dl()),
+            cache_dir=self.cache_dir,
         )
         self.control_concepts = [concept]
         self.metadata["control_regions"] = control_regions
@@ -151,7 +219,7 @@ class ConceptBuilder:
         if self.control_regions is None:
             raise ValueError("Call build_control before creating control regions.")
         seq_fasta_iter = helper.DataFrame2FastaIterator(
-            self.control_regions, self.genome_fasta, batch_size=self.batch_size
+            self.control_regions, self.genome_fasta, batch_size=_INTERNAL_BATCH_SIZE
         )
         return seq_fasta_iter
 
@@ -161,7 +229,7 @@ class ConceptBuilder:
         chrom_iter = helper.DataFrame2ChromTracksIterator(
             self.control_regions,
             self.bws,
-            batch_size=self.batch_size,
+            batch_size=_INTERNAL_BATCH_SIZE,
         )
         return chrom_iter
 
@@ -186,7 +254,6 @@ class ConceptBuilder:
             seq_iter = _SyntheticGCSeqIterator(
                 seq_len=self.input_window_length,
                 n=self.min_samples,
-                batch_size=self.batch_size,
                 gc=gc,
                 seed=seed,
             )
@@ -194,6 +261,7 @@ class ConceptBuilder:
                 id=self._reserve_id(),
                 name=concept_name,
                 data_iter=_PairedLoader(seq_iter, self._control_chrom_dl()),
+                cache_dir=self.cache_dir,
             )
             self.concepts.append(concept)
             added.append(concept)
@@ -261,7 +329,6 @@ class ConceptBuilder:
             self.genome_fasta,
             motifs=motifs,
             num_motifs=self.num_motifs,
-            batch_size=self.batch_size,
             num_workers=self.num_workers,
             start_buffer=start_buffer,
             end_buffer=end_buffer
@@ -270,6 +337,7 @@ class ConceptBuilder:
             id=self._reserve_id(),
             name=concept_name + self.concept_name_suffix,
             data_iter=_PairedLoader(seq_dl, self._control_chrom_dl()),
+            cache_dir=self.cache_dir,
         )
         return concept
 
@@ -302,12 +370,13 @@ class ConceptBuilder:
             seq_fasta_iter = helper.DataFrame2FastaIterator(
                 concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
                 self.genome_fasta,
-                batch_size=self.batch_size,
+                batch_size=_INTERNAL_BATCH_SIZE,
             )
             concept = Concept(
                 id=self._reserve_id(),
                 name=concept_name + self.concept_name_suffix,
                 data_iter=_PairedLoader(seq_fasta_iter, self._control_chrom_dl()),
+                cache_dir=self.cache_dir,
             )
             self.concepts.append(concept)
             added.append(concept)
@@ -342,12 +411,13 @@ class ConceptBuilder:
             chrom_dl = helper.DataFrame2ChromTracksIterator(
                 concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
                 self.bws,
-                batch_size=self.batch_size,
+                batch_size=_INTERNAL_BATCH_SIZE,
             )
             concept = Concept(
                 id=self._reserve_id(),
                 name=concept_name + self.concept_name_suffix,
                 data_iter=_PairedLoader(self._control_seq_dl(), chrom_dl),
+                cache_dir=self.cache_dir,
             )
             self.concepts.append(concept)
             added.append(concept)

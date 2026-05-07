@@ -94,6 +94,7 @@ class TPCAV(torch.nn.Module):
         num_samples_per_concept: int = 10,
         num_pc = None,
         backend = "pca",
+        max_batches_per_epoch: Optional[int] = None,
     ) -> None:
         """
         Sample activations from the provided concepts, compute PCA, and attach
@@ -117,6 +118,7 @@ class TPCAV(torch.nn.Module):
                 patience=10,
                 lam_var=1.0,
                 lam_cov=1.0,
+                max_batches_per_epoch=max_batches_per_epoch,
             )
         else:
             raise ValueError(f"Unsupported backend {backend}; choose 'pca' or 'decorr'.")
@@ -133,9 +135,10 @@ class TPCAV(torch.nn.Module):
 
         sampled_avs = []
         for concept in concepts:
-            avs = self._sample_concept(concept, num_samples=num_samples_per_concept)
+            avs_np = concept.get_embeddings(self, num_samples=num_samples_per_concept)
+            avs = torch.from_numpy(np.array(avs_np)).float()
             logger.info(
-                "Sampled %s activations from concept %s", avs.shape[0], concept.name
+                "Sampled %s activations from concept %s", len(avs), concept.name
             )
             sampled_avs.append(avs)
         all_avs = torch.cat(sampled_avs)
@@ -182,6 +185,7 @@ class TPCAV(torch.nn.Module):
         patience: int = 10,
         lam_var: float = 1.0,
         lam_cov: float = 1.0,
+        max_batches_per_epoch: Optional[int] = None,
     ) -> None:
         """
         Alternative to fit_pca using a learned linear decorrelation layer.
@@ -194,33 +198,38 @@ class TPCAV(torch.nn.Module):
         Sets the same buffers as fit_pca (zscore_mean, zscore_std, Vh, orig_shape)
         so the rest of the pipeline is unaffected.
         """
-        # ── Pass 1: probe shape from first batch ─────────────────────────────
-        logger.info("_fit_decorr: training full decorrelation projection")
-        orig_shape = None
-        input_dim  = None
+        logger.info("_fit_decorr: pre-computing concept embeddings")
+        memmaps = [concept.get_embeddings(self) for concept in concepts]
+        n_per_concept = [len(m) for m in memmaps]
+        min_n = min(n_per_concept)
 
-        # ── Pass 2: train decorrelation projection ───────────────────────────
-        proj = None
-        optimizer = None
+        sample_shape = memmaps[0].shape[1:]
+        input_dim = int(np.prod(sample_shape))
+        orig_shape_1sample = sample_shape
+
+        proj = torch.nn.Linear(input_dim, input_dim, bias=False, device=self.device)
+        torch.nn.init.orthogonal_(proj.weight)
+        optimizer = torch.optim.AdamW(proj.parameters(), lr=lr)
         best_loss = None
-        best_weight = None
+        best_weight = proj.weight.detach().clone()
         patience_count = 0
 
+        from .concepts import _INTERNAL_BATCH_SIZE
+
+        logger.info("_fit_decorr: training full decorrelation projection")
         for epoch in range(max_epochs):
             epoch_losses = []
-            for batches in zip(*[concept.data_iter for concept in concepts]):
+            indices = [np.random.permutation(n) for n in n_per_concept]
+
+            for batch_i, start in enumerate(range(0, min_n, _INTERNAL_BATCH_SIZE)):
+                if max_batches_per_epoch is not None and batch_i >= max_batches_per_epoch:
+                    break
+                end = min(start + _INTERNAL_BATCH_SIZE, min_n)
                 flats = []
-                for inputs in batches:
-                    with torch.no_grad():
-                        av = self._layer_output(*[i.to(self.device) for i in inputs]).detach()
-                    if proj is None:
-                        orig_shape = av.shape
-                        input_dim  = int(np.prod(av.shape[1:]))
-                        proj        = torch.nn.Linear(input_dim, input_dim, bias=False, device=self.device)
-                        torch.nn.init.orthogonal_(proj.weight)
-                        optimizer   = torch.optim.AdamW(proj.parameters(), lr=lr)
-                        best_weight = proj.weight.detach().clone()
-                    flats.append(av.flatten(start_dim=1).float())
+                for mm, idx in zip(memmaps, indices):
+                    batch_np = mm[idx[start:end]]
+                    av = torch.from_numpy(batch_np.reshape(len(batch_np), -1).copy()).float().to(self.device)
+                    flats.append(av)
 
                 flat = torch.cat(flats, dim=0)
                 z    = proj(flat)
@@ -252,12 +261,12 @@ class TPCAV(torch.nn.Module):
                     logger.info("_fit_decorr: early stopping at epoch %d", epoch + 1)
                     break
 
-        # Vh shape (num_pc, input_dim) matches SVD convention in project_activations.
+        # Vh shape (input_dim, input_dim) matches SVD convention in project_activations.
         # zscore_mean/std set to 0/1 (no-op) for pipeline compatibility.
         self._set_buffer("zscore_mean", torch.zeros(input_dim, device=self.device))
         self._set_buffer("zscore_std",  torch.ones(input_dim,  device=self.device))
         self._set_buffer("Vh",          best_weight)
-        self._set_buffer("orig_shape",  torch.tensor([1, *orig_shape[1:]], device=self.device))
+        self._set_buffer("orig_shape",  torch.tensor([1, *list(orig_shape_1sample)], device=self.device))
         self.fitted = True
         logger.info("_fit_decorr: done.")
 
@@ -284,11 +293,12 @@ class TPCAV(torch.nn.Module):
 
     def concept_embeddings(self, concept, num_samples: int) -> torch.Tensor:
         """Return concatenated projected + residual activations for a concept."""
-        residual, projected = self._sample_concept_embeddings(concept, num_samples=num_samples)
-
+        avs_np = concept.get_embeddings(self, num_samples=num_samples)
+        avs = torch.from_numpy(np.array(avs_np)).float().to(self.device)
+        residual, projected = self.project_activations(avs)
         if projected is not None:
-            return torch.cat((projected, residual), dim=1)
-        return residual.detach()
+            return torch.cat((projected, residual), dim=1).detach().cpu()
+        return residual.detach().cpu()
 
     def forward_from_embeddings_at_layer(
         self,
@@ -425,39 +435,6 @@ class TPCAV(torch.nn.Module):
             )
 
         return [torch.cat(z) for z in zip(*attributions)]
-
-    def _sample_concept(self, concept, num_samples: int) -> torch.Tensor:
-        avs: List[torch.Tensor] = []
-        num = 0
-        for inputs in concept.data_iter:
-            av = self._layer_output(*[i.to(self.device) for i in inputs])
-            avs.append(av.detach().cpu())
-            num += av.shape[0]
-            if num >= num_samples:
-                break
-        if not avs:
-            raise ValueError(f"No activations gathered for concept {concept.name}")
-        return torch.cat(avs)[:num_samples]
-
-    def _sample_concept_embeddings(self, concept, num_samples: int) -> List[Union[torch.Tensor, None]]:
-        num = 0
-        residuals = []; projected = []
-        for inputs in concept.data_iter:
-            av = self._layer_output(*[i.to(self.device) for i in inputs]).detach()
-            r, p = self.project_activations(av)
-            residuals.append(r.cpu())
-            if p is not None:
-                projected.append(p.cpu())
-            else:
-                projected.append(p)
-            num += av.shape[0]
-            if num >= num_samples:
-                break
-        if not residuals:
-            raise ValueError(f"No activations gathered for concept {concept.name}")
-        residuals = torch.cat(residuals)
-        projected = torch.cat(projected) if p is not None else None
-        return residuals, projected
 
     def _layer_output(self, *inputs: Tuple[torch.Tensor]) -> torch.Tensor:
         """Return activations from the configured layer or model hook."""
