@@ -419,7 +419,7 @@ class CavTrainer:
 
         # Project control embeddings once and save to disk.
         control_proj_path = output_dir_path / "_control_projected.npy"
-        ctrl_emb = self.tpcav.concept_embeddings(self.control, num_samples)
+        ctrl_emb = self.tpcav.get_concept_embeddings_projected(self.control, num_samples)
         np.save(str(control_proj_path), ctrl_emb.numpy())
         del ctrl_emb
 
@@ -428,7 +428,7 @@ class CavTrainer:
                 concept_dir = output_dir_path / c.name
                 concept_dir.mkdir(parents=True, exist_ok=True)
                 concept_proj_path = concept_dir / "concept_projected.npy"
-                c_emb = self.tpcav.concept_embeddings(c, num_samples)
+                c_emb = self.tpcav.get_concept_embeddings_projected(c, num_samples)
                 np.save(str(concept_proj_path), c_emb.numpy())
                 del c_emb
 
@@ -453,7 +453,7 @@ class CavTrainer:
                     concept_dir = output_dir_path / c.name
                     concept_dir.mkdir(parents=True, exist_ok=True)
                     concept_proj_path = concept_dir / "concept_projected.npy"
-                    c_emb = self.tpcav.concept_embeddings(c, num_samples)
+                    c_emb = self.tpcav.get_concept_embeddings_projected(c, num_samples)
                     np.save(str(concept_proj_path), c_emb.numpy())
                     del c_emb
 
@@ -506,10 +506,10 @@ class CavTrainer:
                 concept_proj_path = concept_dir / "concept_projected.npy"
                 control_proj_path = concept_dir / "control_projected.npy"
 
-                c_emb = self.tpcav.concept_embeddings(c_test, num_samples)
+                c_emb = self.tpcav.get_concept_embeddings_projected(c_test, num_samples)
                 np.save(str(concept_proj_path), c_emb.numpy())
                 del c_emb
-                ctrl_emb = self.tpcav.concept_embeddings(c_control, num_samples)
+                ctrl_emb = self.tpcav.get_concept_embeddings_projected(c_control, num_samples)
                 np.save(str(control_proj_path), ctrl_emb.numpy())
                 del ctrl_emb
 
@@ -536,10 +536,10 @@ class CavTrainer:
                     concept_proj_path = concept_dir / "concept_projected.npy"
                     control_proj_path = concept_dir / "control_projected.npy"
 
-                    c_emb = self.tpcav.concept_embeddings(c_test, num_samples)
+                    c_emb = self.tpcav.get_concept_embeddings_projected(c_test, num_samples)
                     np.save(str(concept_proj_path), c_emb.numpy())
                     del c_emb
-                    ctrl_emb = self.tpcav.concept_embeddings(c_control, num_samples)
+                    ctrl_emb = self.tpcav.get_concept_embeddings_projected(c_control, num_samples)
                     np.save(str(control_proj_path), ctrl_emb.numpy())
                     del ctrl_emb
 

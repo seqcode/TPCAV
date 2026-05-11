@@ -291,7 +291,7 @@ class TPCAV(torch.nn.Module):
         else:
             return y, None
 
-    def concept_embeddings(self, concept, num_samples: int) -> torch.Tensor:
+    def get_concept_embeddings_projected(self, concept, num_samples: int) -> torch.Tensor:
         """Return concatenated projected + residual activations for a concept."""
         avs_np = concept.get_embeddings(self, num_samples=num_samples)
         avs = torch.from_numpy(np.array(avs_np)).float().to(self.device)
