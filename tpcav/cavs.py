@@ -895,6 +895,7 @@ def run_tpcav(
     html_report_fscore_thresh=0.9,
     seed=1001,
     backend='sklearn',
+    pca_backend='pca',
     device=None,
     cache_dir: Optional[str] = "tpcav_cache/",
 ):
@@ -930,7 +931,7 @@ def run_tpcav(
             min_samples=num_samples_for_cav,
             num_workers=num_workers,
             rng_seed=seed,
-            cache_dir=cache_dir,
+            cache_dir=str(Path(cache_dir) / f"{nm}_motifs"),
         )
         # use random regions as control
         builder.build_control()
@@ -983,6 +984,7 @@ def run_tpcav(
         concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + non_motif_concept_builder.concepts_for_pca() if non_motif_concept_builder is not None else motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca(),
         num_samples_per_concept=num_samples_for_pca,
         num_pc=num_pc,
+        backend=pca_backend,
     )
     #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 

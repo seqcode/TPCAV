@@ -325,7 +325,7 @@ class ConceptBuilder:
         if self.include_reverse_complement:
             motifs.extend([m.reverse_complement() for m in motifs])
         seq_dl = _construct_motif_concept_dataloader_from_control(
-            control_regions,
+            control_regions.sample(n=int(self.min_samples/len(motifs)), random_state=self.rng_seed),
             self.genome_fasta,
             motifs=motifs,
             num_motifs=self.num_motifs,

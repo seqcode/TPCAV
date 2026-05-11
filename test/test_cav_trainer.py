@@ -8,7 +8,7 @@ from captum.attr import DeepLift
 
 from tpcav import helper, run_tpcav, utils, report
 from tpcav.cavs import CavTrainer
-from tpcav.concepts import ConceptBuilder
+from tpcav.concepts import ConceptBuilder, _INTERNAL_BATCH_SIZE
 from tpcav.tpcav_model import TPCAV, _abs_attribution_func
 
 from line_profiler import LineProfiler
@@ -60,8 +60,7 @@ class TPCAVTest(unittest.TestCase):
             bws=None,
             num_motifs=16,
             include_reverse_complement=True,
-            min_samples=1000,
-            batch_size=8,
+            min_samples=100,
         )
 
         builder.build_control()
@@ -216,8 +215,7 @@ class TPCAVTest(unittest.TestCase):
             bws=None,
             num_motifs=16,
             include_reverse_complement=True,
-            min_samples=1000,
-            batch_size=8,
+            min_samples=100,
         )
 
         builder.build_control()
@@ -243,8 +241,7 @@ class TPCAVTest(unittest.TestCase):
             bws=None,
             num_motifs=12,
             include_reverse_complement=True,
-            min_samples=1000,
-            batch_size=8,
+            min_samples=100,
         )
 
         builder.build_control()
@@ -276,8 +273,7 @@ class TPCAVTest(unittest.TestCase):
             bws=None,
             num_motifs=12,
             include_reverse_complement=True,
-            min_samples=1000,
-            batch_size=8,
+            min_samples=100,
         )
 
         builder.build_control()
@@ -290,7 +286,7 @@ class TPCAVTest(unittest.TestCase):
 
         batch = next(iter(builder.all_concepts()[0].data_iter))
 
-        self.assertTupleEqual(batch[0].shape, (builder.batch_size, 4, 1024))
+        self.assertTupleEqual(batch[0].shape, (_INTERNAL_BATCH_SIZE, 4, 1024))
 
         device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -310,7 +306,7 @@ class TPCAVTest(unittest.TestCase):
         torch.save(tpcav_model, "data/tmp_tpcav_model.pt")
 
         cav_trainer = CavTrainer(tpcav_model, penalty="l2")
-        cav_trainer.set_control(builder.control_concepts[0], num_samples=100)
+        cav_trainer.set_control(builder.control_concepts[0])
 
         cav_trainer.train_concepts(
                 builder.concepts, 100, output_dir="data/cavs/", num_processes=1, backend='torch', device='cuda:1' if torch.cuda.device_count() > 1 else 'cuda:0', 
