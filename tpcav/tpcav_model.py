@@ -111,6 +111,8 @@ class TPCAV(torch.nn.Module):
                 num_pc=num_pc,
             )
         elif backend == "decorr":
+            if num_pc is not None and num_pc != "full":
+                logger.warning("num_pc is ignored when using 'decorr' backend; full decorrelation will be applied.")
             self._fit_decorr(
                 concepts,
                 lr=1e-3,

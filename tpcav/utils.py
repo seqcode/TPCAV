@@ -235,16 +235,15 @@ def iterate_seq_df_chunk(
                     f"catch FetchError in region {item.chrom}:{item.start}-{item.end}, probably start coordinate negative"
                 )
             continue
-        unique_chars = np.unique(list(seq))
-        if "N" in seq:
-            if print_warning:
-                print(f"Skip {item.chrom}:{item.start}-{item.end} due to containing N")
-            continue
-        elif len(unique_chars) == 0:
+        if not seq:
             if print_warning:
                 print(
                     f"Skip region {item.chrom}:{item.start}-{item.end} due to no sequences available"
                 )
+            continue
+        if "N" in seq:
+            if print_warning:
+                print(f"Skip {item.chrom}:{item.start}-{item.end} due to containing N")
             continue
 
         if motif is not None:
@@ -465,25 +464,26 @@ def insert_motif_into_seq(
     end_buffer=50,
     rng=np.random.default_rng(1),
 ):
-    
-    seq_ins = list(deepcopy(seq))
-    pos_motif_overlap = np.ones(len(seq))
-    pos_motif_overlap[:start_buffer] = 0
-    pos_motif_overlap[(-end_buffer - len(motif)) :] = 0
+    motif_len = len(motif)
+    seq_len = len(seq)
+    valid_end = seq_len - end_buffer - motif_len
+
+    pos_available = np.zeros(seq_len, dtype=bool)
+    if valid_end > start_buffer:
+        pos_available[start_buffer:valid_end] = True
+
+    instances = motif.sample_instances(num_motifs)
+
+    seq_ins = list(seq)
     num_insert_motifs = 0
     for i in range(num_motifs):
-        try:
-            motif_start = rng.choice(
-                np.where(pos_motif_overlap > 0)[0]
-            ).item()  # randomly pick insert location
-        except ValueError:
-            # print(
-            #    f"No samples can be taken for motif {motif.name}, skip inserting the rest of motifs"
-            # )
+        valid_positions = np.flatnonzero(pos_available)
+        if len(valid_positions) == 0:
             break
-        seq_ins[motif_start : (motif_start + len(motif))] = motif.sample_instance()
-
-        pos_motif_overlap[(motif_start - len(motif)) : (motif_start + len(motif))] = 0
+        motif_start = rng.choice(valid_positions).item()
+        seq_ins[motif_start : motif_start + motif_len] = instances[i]
+        excl_start = max(0, motif_start - motif_len)
+        pos_available[excl_start : motif_start + motif_len] = False
         num_insert_motifs += 1
     if num_insert_motifs < num_motifs:
         logger.warning(
@@ -510,6 +510,9 @@ class ConsensusMotif:
     def sample_instance(self):
         return self.consensus
 
+    def sample_instances(self, n):
+        return [self.consensus] * n
+
 class PermutedConsensusMotif:
     def __init__(self, name, consensus, seed=None, min_shift=0.3):
         self.name = name
@@ -528,6 +531,9 @@ class PermutedConsensusMotif:
 
     def sample_instance(self):
         return self._permute(self.consensus)
+
+    def sample_instances(self, n):
+        return [self._permute(self.consensus) for _ in range(n)]
 
     def _permute(self, max_attempts=100):
         """
@@ -609,7 +615,12 @@ class PermutedPWMMotif:
     def sample_instance(self):
         return sample_from_pwm(self._permute_pwm_positions(), rng=self.rng)
 
+    def sample_instances(self, n):
+        return [sample_from_pwm(self._permute_pwm_positions(), rng=self.rng) for _ in range(n)]
+
 class BioMotifWrapped:
+    _CACHE_SIZE = 20_000
+
     def __init__(self, motif, seed=None):
         """
         Wrapper class for Bio Motif
@@ -619,6 +630,13 @@ class BioMotifWrapped:
         self.length = len(motif.consensus)
         self.pwm_prob_mat = get_prob_mat_from_motif_pwm(motif.pwm)
         self.rng = np.random.RandomState(seed)
+        self._cache: list = []
+        self._cache_idx: int = 0
+        self._refill_cache()
+
+    def _refill_cache(self):
+        self._cache = sample_from_pwm(self.pwm_prob_mat, n_seqs=self._CACHE_SIZE, rng=self.rng)
+        self._cache_idx = 0
 
     def __len__(self):
         return self.length
@@ -628,11 +646,28 @@ class BioMotifWrapped:
         rc.motif = self.motif.reverse_complement()
         rc.name = self.motif.name + "_rc"
         rc.pwm_prob_mat = get_prob_mat_from_motif_pwm(rc.motif.pwm)
-
+        rc._refill_cache()
         return rc
 
     def sample_instance(self):
-        return sample_from_pwm(self.pwm_prob_mat, rng=self.rng)
+        if self._cache_idx >= self._CACHE_SIZE:
+            self._refill_cache()
+        seq = self._cache[self._cache_idx]
+        self._cache_idx += 1
+        return seq
+
+    def sample_instances(self, n):
+        result = []
+        remaining = n
+        while remaining > 0:
+            available = self._CACHE_SIZE - self._cache_idx
+            take = min(remaining, available)
+            result.extend(self._cache[self._cache_idx : self._cache_idx + take])
+            self._cache_idx += take
+            remaining -= take
+            if remaining > 0:
+                self._refill_cache()
+        return result
 
 def write_meme_v4(motifs_dict, output_file, background=0.25):
     """
