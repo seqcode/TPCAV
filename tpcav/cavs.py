@@ -524,7 +524,8 @@ class CavTrainer:
                 self._cleanup_paths([str(concept_memmap_path), str(control_memmap_path)])
         else:
             futures = []; results = []
-            with ProcessPoolExecutor(max_workers=num_processes) as executor:
+            ctx = mp.get_context("spawn")
+            with ProcessPoolExecutor(mp_context=ctx, max_workers=num_processes) as executor:
                 for c_test, c_control in concept_pair_list:
                     concept_embeddings = self.tpcav.concept_embeddings(
                         c_test, num_samples=num_samples

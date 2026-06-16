@@ -109,6 +109,8 @@ class TPCAV(torch.nn.Module):
         orig_shape = all_avs.shape
         flat = all_avs.flatten(start_dim=1)
 
+        logger.info("Computing PCA on %s samples with %s features", flat.shape[0], flat.shape[1])
+
         mean = flat.mean(dim=0)
         std = flat.std(dim=0)
         std[std == 0] = -1
@@ -125,6 +127,16 @@ class TPCAV(torch.nn.Module):
             Vh = torch.tensor(Vh[: int(num_pc)])
 
         self.eigen_values = np.square(S) if S is not None else None
+
+        if S is not None:
+            var_explained = np.square(S) / np.square(S).sum()
+            top_n = min(10, len(var_explained))
+            top_cumulative = var_explained[:top_n].cumsum()
+            lines = "  ".join(
+                f"PC{i+1}: {var_explained[i]*100:.1f}% (cum {top_cumulative[i]*100:.1f}%)"
+                for i in range(top_n)
+            )
+            logger.info("Variance explained — %s", lines)
 
         self._set_buffer("zscore_mean", mean.to(self.device))
         self._set_buffer("zscore_std", std.to(self.device))
