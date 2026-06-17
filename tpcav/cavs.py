@@ -189,7 +189,7 @@ class _SGDWrapper:
     def fit(self, train_avs: np.ndarray, train_ls: np.ndarray):
         self.search.fit(train_avs, train_ls)
         self.lm = self.search.best_estimator_
-        logger.info(
+        logger.debug(
             "Best Params: %s | Iterations: %s",
             self.search.best_params_,
             self.lm.n_iter_,
@@ -464,7 +464,7 @@ class CavTrainer:
                         device=device,
                         name=c.name,
                     )
-                    logger.info("Submitted CAV training for concept %s", c.name)
+                    logger.debug("Submitted CAV training for concept %s", c.name)
                     futures.append((c.name, future, [str(concept_memmap_path)]))
 
                 for name, fut, paths in futures:
@@ -556,7 +556,7 @@ class CavTrainer:
                         device=device,
                         name=c_test.name,
                     )
-                    logger.info("Submitted CAV training for concept %s", c_test.name)
+                    logger.debug("Submitted CAV training for concept %s", c_test.name)
                     futures.append(
                         (
                             c_test.name,

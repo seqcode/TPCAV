@@ -41,6 +41,7 @@ class TPCAV(torch.nn.Module):
         self.model.to(self.device)
         self.model.eval()
         self.fitted = False
+        self._full_transform = False
         if layer is not None:
             self.layer = Untracked(layer)
             self.layer_name = ""
@@ -88,6 +89,40 @@ class TPCAV(torch.nn.Module):
         """List all module names in the model for layer selection."""
         return [name for name, _ in self.model.named_modules()]
 
+    def _collect_concept_examples(self, concepts, num_samples_per_concept: int) -> torch.Tensor:
+        """Collect concept examples from each concept and return as a single tensor."""
+        sampled_avs = []
+        for concept in concepts:
+            avs = self._sample_concept(concept, num_samples=num_samples_per_concept)
+            logger.info(
+                "Sampled %s activations from concept %s", avs.shape[0], concept.name
+            )
+            sampled_avs.append(avs)
+        return torch.cat(sampled_avs)
+
+    def _evaluate_transformation(self, activations: torch.Tensor, num_dims_to_evaluate=500) -> None:
+        """Evaluate the quality of the linear transformation by comparing the correlation between dimensions before and after transformation."""
+        if not self.fitted:
+            raise RuntimeError("Call fit_pca before evaluating transformation.")
+        activations_flat = activations.flatten(start_dim=1)
+        avs_residual, avs_projected = self.project_activations(activations_flat)
+
+        # subsample dimensions for correlation evaluation if there are too many
+        def compute_mean_abs_corr(tensor):
+            if tensor.shape[1] > num_dims_to_evaluate:
+                tensor = tensor[:, torch.randperm(tensor.shape[1])[:num_dims_to_evaluate]]
+            # compute pearson correlation matrix and return mean absolute values in the matrix
+            corr = torch.corrcoef(tensor.T) # [dims, dims]
+            k = corr.shape[0]
+            off_diag = corr.abs().sum() - k  # sum of absolute values minus diagonal
+            return (off_diag / (k * (k - 1))).item()
+
+        logger.info("Mean absolute pearson correlation on concept activations before transformation: %.4f", compute_mean_abs_corr(activations_flat))
+        if not self._full_transform:
+            logger.info("Mean absolute pearson correlation on residuals after transformation: %.4f", compute_mean_abs_corr(avs_residual))
+        if avs_projected is not None:
+            logger.info("Mean absolute pearson correlation on projected activations after transformation: %.4f", compute_mean_abs_corr(avs_projected))
+
     def fit_pca(
         self,
         concepts: Iterable,
@@ -98,14 +133,7 @@ class TPCAV(torch.nn.Module):
 
         logger.info("Start building PCA transformation.")
 
-        sampled_avs = []
-        for concept in concepts:
-            avs = self._sample_concept(concept, num_samples=num_samples_per_concept)
-            logger.info(
-                "Sampled %s activations from concept %s", avs.shape[0], concept.name
-            )
-            sampled_avs.append(avs)
-        all_avs = torch.cat(sampled_avs)
+        all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
         orig_shape = all_avs.shape
         flat = all_avs.flatten(start_dim=1)
 
@@ -119,11 +147,14 @@ class TPCAV(torch.nn.Module):
         if num_pc is None or num_pc == "full":
             _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
             Vh = torch.tensor(Vh)
+            self._full_transform=True
         elif int(num_pc) == 0:
             S = None
             Vh = None
+            self._full_transform=False
         else:
             _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
+            self._full_transform = False if int(num_pc) < standardized.shape[1] else True
             Vh = torch.tensor(Vh[: int(num_pc)])
 
         self.eigen_values = np.square(S) if S is not None else None
@@ -145,6 +176,7 @@ class TPCAV(torch.nn.Module):
         self.fitted = True
 
         logger.info("PCA transformation built.")
+        self._evaluate_transformation(all_avs)
 
         return {
             "zscore_mean": mean,
