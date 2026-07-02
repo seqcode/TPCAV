@@ -58,10 +58,12 @@ class _TorchLinear(torch.nn.Module):
     
     def fit(self, train_avs: np.ndarray, train_ls: np.ndarray,
             val_avs: np.ndarray, val_ls: np.ndarray,
-            patience=10, lr=1e-2, weight_decay=1e-2, max_epochs=1000):
+            patience=10, lr=1e-2, weight_decay=1e-2, max_epochs=1000,
+            concept_avs_t: Optional[torch.Tensor] = None,
+            ortho_lam: float = 0.0, ortho_eta: float = 1e-3):
 
         optimizer = torch.optim.AdamW(self.parameters(), lr=lr, weight_decay=weight_decay)
-        
+
         best_loss = None
         best_state_dict = None
         epoch = 0
@@ -72,16 +74,23 @@ class _TorchLinear(torch.nn.Module):
 
             #shuffle the tensors before every epoch
             train_avs, train_ls = self.shuffle_tensor(train_avs, train_ls)
-            
+
             self.train()
             for i in range(0, len(train_avs), 32):
                 optimizer.zero_grad()
 
                 avs = torch.from_numpy(train_avs[i: (i+32)])
                 l = torch.from_numpy(train_ls[i: (i+32)])
-            
+
                 y_hat = self(avs.to(self.device))
                 loss = torch.mean(torch.clamp(1 - l.to(self.device) * y_hat, min=0))
+
+                if concept_avs_t is not None and ortho_lam > 0:
+                    w = self.linear.weight[0]
+                    proj = concept_avs_t @ w
+                    var_term = proj.pow(2).mean()
+                    ridge_term = w.pow(2).sum()
+                    loss = loss + ortho_lam * (var_term + ortho_eta * ridge_term)
 
                 loss.backward()
                 optimizer.step()
@@ -121,14 +130,22 @@ class _TorchLinearWrapper:
         self.weight_decay_search = weight_decay_search
         self.device = device
 
-    def fit(self, train_val_avs: np.ndarray, train_val_ls: np.ndarray):
+    def fit(self, train_val_avs: np.ndarray, train_val_ls: np.ndarray,
+            concept_avs: Optional[np.ndarray] = None,
+            ortho_lam: float = 0.0, ortho_eta: float = 1e-3):
 
         train_avs, val_avs, train_ls, val_ls = train_test_split(train_val_avs, train_val_ls, test_size=0.1)
-        
+
+        concept_avs_t = (
+            torch.from_numpy(concept_avs).float().to(self.device).detach()
+            if concept_avs is not None else None
+        )
+
         best_state_dict = None; best_loss = None
         for w in self.weight_decay_search:
             model = _TorchLinear(self.input_dim, self.num_class, device=self.device).to(self.device)
-            state_dict, loss = model.fit(train_avs, train_ls, val_avs, val_ls, lr=self.lr, weight_decay=w)
+            state_dict, loss = model.fit(train_avs, train_ls, val_avs, val_ls, lr=self.lr, weight_decay=w,
+                                         concept_avs_t=concept_avs_t, ortho_lam=ortho_lam, ortho_eta=ortho_eta)
             if (best_loss is None) or (loss < best_loss):
                 best_loss = loss
                 best_state_dict = state_dict
@@ -245,6 +262,9 @@ def _train(
     backend: str = "sklearn",
     device=None,
     name=None,
+    concept_avs: Optional[np.ndarray] = None,
+    ortho_lam: float = 0.0,
+    ortho_eta: float = 1e-3,
 ) -> Tuple[float, torch.Tensor]:
     """
     Train a binary CAV classifier for a concept vs cached control embeddings.
@@ -259,14 +279,15 @@ def _train(
     
     if backend == "sklearn":
         clf = _SGDWrapper(penalty=penalty)
+        clf.fit(train_avs, train_l)
     else:
         # replace label 0 as -1 to accomodate hinge loss
         train_l[train_l==0] = -1
         test_l[test_l==0] = -1
-        
+
         device = device or ('cuda:0' if torch.cuda.is_available else 'cpu')
-        clf = _TorchLinearWrapper(input_dim= train_avs.shape[1], device=device)
-    clf.fit(train_avs, train_l)
+        clf = _TorchLinearWrapper(input_dim=train_avs.shape[1], device=device)
+        clf.fit(train_avs, train_l, concept_avs=concept_avs, ortho_lam=ortho_lam, ortho_eta=ortho_eta)
     
     def _eval(avs, l, name: str):
         
@@ -397,7 +418,9 @@ class CavTrainer:
         num_processes: int = 1,
         max_pending: int = 8,
         backend='sklearn',
-        device=None
+        device=None,
+        ortho_lam: float = 0.0,
+        ortho_eta: float = 1e-3,
     ):
         "Train concepts with a fixed control set by self.set_control()"
         if self.control_embeddings is None:
@@ -406,6 +429,20 @@ class CavTrainer:
             )
         else:
             self.control_embeddings = self.control_embeddings.cpu()
+
+        if self.tpcav.fitting_mode == "implicit":
+            if backend != "torch":
+                logger.warning(
+                    "ortho regularization requires backend='torch'; implicit_activations will be ignored for backend='%s'",
+                    backend,
+                )
+            concept_avs = self.tpcav.implicit_activations
+        elif self.tpcav.fitting_mode == "pca":
+            concept_avs = None
+        else:
+            raise RuntimeError(
+                "Call tpcav.fit_pca() or tpcav.fit_implicit() before training CAVs."
+            )
 
         output_dir_path = Path(output_dir)
         output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -429,6 +466,9 @@ class CavTrainer:
                     backend=backend,
                     device=device,
                     name=c.name,
+                    concept_avs=concept_avs,
+                    ortho_lam=ortho_lam,
+                    ortho_eta=ortho_eta,
                 )
                 self.cav_fscores[c.name] = fscore
                 self.cav_weights[c.name] = weight
@@ -463,6 +503,9 @@ class CavTrainer:
                         backend=backend,
                         device=device,
                         name=c.name,
+                        concept_avs=concept_avs,
+                        ortho_lam=ortho_lam,
+                        ortho_eta=ortho_eta,
                     )
                     logger.debug("Submitted CAV training for concept %s", c.name)
                     futures.append((c.name, future, [str(concept_memmap_path)]))
@@ -484,11 +527,27 @@ class CavTrainer:
                              num_processes: int = 1,
                              max_pending: int = 8,
                              backend='sklearn',
-                             device=None):
+                             device=None,
+                             ortho_lam: float = 0.0,
+                             ortho_eta: float = 1e-3):
         """Train concept pairs (test concept, control concept)
 
         Note: It would compute embeddings on every control concept, use self.train_concepts if control concept is fixed
         """
+        if self.tpcav.fitting_mode == "implicit":
+            if backend != "torch":
+                logger.warning(
+                    "ortho regularization requires backend='torch'; implicit_activations will be ignored for backend='%s'",
+                    backend,
+                )
+            concept_avs = self.tpcav.implicit_activations
+        elif self.tpcav.fitting_mode == "pca":
+            concept_avs = None
+        else:
+            raise RuntimeError(
+                "Call tpcav.fit_pca() or tpcav.fit_implicit() before training CAVs."
+            )
+
         output_dir_path = Path(output_dir)
         output_dir_path.mkdir(parents=True, exist_ok=True)
 
@@ -516,6 +575,9 @@ class CavTrainer:
                     backend=backend,
                     device=device,
                     name=c_test.name,
+                    concept_avs=concept_avs,
+                    ortho_lam=ortho_lam,
+                    ortho_eta=ortho_eta,
                 )
                 self.cav_fscores[c_test.name] = fscore
                 self.cav_weights[c_test.name] = weight
@@ -555,6 +617,9 @@ class CavTrainer:
                         backend=backend,
                         device=device,
                         name=c_test.name,
+                        concept_avs=concept_avs,
+                        ortho_lam=ortho_lam,
+                        ortho_eta=ortho_eta,
                     )
                     logger.debug("Submitted CAV training for concept %s", c_test.name)
                     futures.append(
@@ -894,7 +959,7 @@ def run_tpcav(
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
     num_pc: Union[str,int]='full',
-    p=1, 
+    p=1,
     max_pending_jobs=4,
     save_cav_trainer=True,
     generate_html_report=True,
@@ -902,6 +967,10 @@ def run_tpcav(
     seed=1001,
     backend='sklearn',
     device=None,
+    fitting_mode: str = "pca",
+    num_samples_for_implicit: int = 10,
+    ortho_lam: float = 0.0,
+    ortho_eta: float = 1e-3,
 ):
     """
     One-stop function to compute CAVs on motif concepts and bed concepts, compute AUC of motif concept f-scores after correction
@@ -983,12 +1052,22 @@ def run_tpcav(
 
     # create TPCAV model on top of the given model
     tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
-    # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
-    tpcav_model.fit_pca(
-        concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + non_motif_concept_builder.concepts_for_pca() if non_motif_concept_builder is not None else motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca(),
-        num_samples_per_concept=num_samples_for_pca,
-        num_pc=num_pc,
+    assert fitting_mode in ("pca", "implicit"), "fitting_mode must be 'pca' or 'implicit'"
+    fitting_concepts = (
+        motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca()
+        + (non_motif_concept_builder.concepts_for_pca() if non_motif_concept_builder is not None else [])
     )
+    if fitting_mode == "pca":
+        tpcav_model.fit_pca(
+            concepts=fitting_concepts,
+            num_samples_per_concept=num_samples_for_pca,
+            num_pc=num_pc,
+        )
+    else:
+        tpcav_model.fit_implicit(
+            concepts=fitting_concepts,
+            num_samples_per_concept=num_samples_for_implicit,
+        )
     #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
     # create trainer for computing CAVs
@@ -996,16 +1075,18 @@ def run_tpcav(
     for nm in num_motif_insertions:
         cav_trainer = CavTrainer(tpcav_model, penalty="l2")
         if motif_control_type == 'permute':
-            cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
-                                             num_samples_for_cav, 
+            cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm],
+                                             num_samples_for_cav,
                                              output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                             num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device)
+                                             num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device,
+                                             ortho_lam=ortho_lam, ortho_eta=ortho_eta)
         else:
             cav_trainer.set_control(motif_concept_builders[nm].control_concepts[0], num_samples=num_samples_for_cav)
             cav_trainer.train_concepts([c for c, _ in motif_concepts_pairs[nm]],
                                         num_samples_for_cav,
                                         output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                        num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device)
+                                        num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device,
+                                        ortho_lam=ortho_lam, ortho_eta=ortho_eta)
         if save_cav_trainer:
             torch.save(cav_trainer, str(output_path / f"cavs_{nm}_motifs/cav_trainer.pt"))
         motif_cav_trainers[nm] = cav_trainer
@@ -1021,7 +1102,9 @@ def run_tpcav(
             output_dir=str(output_path / f"cavs_bed_concepts/"),
             num_processes=p,
             backend=backend,
-            device=device
+            device=device,
+            ortho_lam=ortho_lam,
+            ortho_eta=ortho_eta,
         )
         if save_cav_trainer:
             torch.save(bed_cav_trainer, str(output_path / f"cavs_bed_concepts/cav_trainer.pt"))

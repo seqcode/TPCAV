@@ -164,6 +164,23 @@ class TPCAVTest(unittest.TestCase):
             output_dir="data/test_run_tpcav_output/",
         )
 
+    def test_run_tpcav_fitting_mode_implicit(self):
+        motif_path = Path("data") / "custom_motifs_alan.tsv"
+        genome_fasta = "data/hg38.analysisSet.fa"
+        model = DummyModelSeq()
+        layer_name = "layer1"
+
+        cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
+            model=model,
+            layer_name=layer_name,
+            motif_file=str(motif_path),
+            motif_file_fmt='consensus',
+            genome_fasta=genome_fasta,
+            num_motif_insertions=[4, 8],
+            fitting_mode="implicit",
+            output_dir="data/test_run_tpcav_output/",
+        )
+
     def test_run_tpcav_permute_control(self):
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
         genome_fasta = "data/hg38.analysisSet.fa"
@@ -260,7 +277,7 @@ class TPCAVTest(unittest.TestCase):
                 gc_c += s.count('G') + s.count('C')
             assert (gc_c/total_c) - gc_content < 0.05
 
-    def test_all(self):
+    def test_all(self, fitting_mode='implicit'):
         #lp = LineProfiler()
         #        # Add installed-package functions you care about
         #lp.add_function(utils.iterate_seq_df_chunk)
@@ -295,21 +312,31 @@ class TPCAVTest(unittest.TestCase):
         device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
         tpcav_model = TPCAV(DummyModelSeq(), layer_name="layer1").to(device)
-        tpcav_model.fit_pca(
-            concepts=builder.concepts_for_pca(),
-            num_samples_per_concept=10,
-            num_pc="full",
-        )
+
+        if fitting_mode=='pca':
+            tpcav_model.fit_pca(
+                concepts=builder.concepts_for_pca(),
+                num_samples_per_concept=10,
+                num_pc="full",
+            )
+        elif fitting_mode=='implicit':
+            tpcav_model.fit_implicit(
+                concepts=builder.concepts_for_pca(),
+                num_samples_per_concept=10,
+                )
+        else:
+            raise Exception
+
         torch.save(tpcav_model, "data/tmp_tpcav_model.pt")
 
         cav_trainer = CavTrainer(tpcav_model, penalty="l2")
         cav_trainer.set_control(builder.control_concepts[0], num_samples=100)
 
+        #cav_trainer.train_concepts(
+        #    builder.concepts, 100, output_dir="data/cavs/", num_processes=2
+        #)
         cav_trainer.train_concepts(
                 builder.concepts, 100, output_dir="data/cavs/", num_processes=1, backend='torch', device='cuda:1' if torch.cuda.device_count() > 1 else 'cuda:0', 
-        )
-        cav_trainer.train_concepts(
-            builder.concepts, 100, output_dir="data/cavs/", num_processes=2
         )
         torch.save(cav_trainer, "data/tmp_cav_trainer.pt")
 
@@ -370,7 +397,7 @@ class TPCAVTest(unittest.TestCase):
             random2_avs
         )
 
-        def forward_from_layer_1_embeddings(tm, avs_residual, avs_projected):
+        def forward_from_layer_1_embeddings(tm, avs_residual, avs_projected=None):
             y_hat = tm.embedding_to_layer_activation(avs_residual, avs_projected)
             y_hat = tm.model.foward_from_layer1(y_hat)
             return y_hat
@@ -378,19 +405,31 @@ class TPCAVTest(unittest.TestCase):
         tpcav_model.forward = partial(forward_from_layer_1_embeddings, tpcav_model)
 
         dl = DeepLift(tpcav_model)
-        attributions_old = dl.attribute(
-            (
-                random1_avs_residual.to(tpcav_model.device),
-                random1_avs_projected.to(tpcav_model.device),
-            ),
-            baselines=(
-                random2_avs_residual.to(tpcav_model.device),
-                random2_avs_projected.to(tpcav_model.device),
-            ),
-            custom_attribution_func=_abs_attribution_func,
-        )
-        attr_residual, attr_projected = attributions_old
-        attributions_old = torch.cat((attr_projected, attr_residual), dim=1).cpu()
+        if random1_avs_projected is not None:
+            attributions_old = dl.attribute(
+                (
+                    random1_avs_residual.to(tpcav_model.device),
+                    random1_avs_projected.to(tpcav_model.device),
+                ),
+                baselines=(
+                    random2_avs_residual.to(tpcav_model.device),
+                    random2_avs_projected.to(tpcav_model.device),
+                ),
+                custom_attribution_func=_abs_attribution_func,
+            )
+            attr_residual, attr_projected = attributions_old
+            attributions_old = torch.cat((attr_projected, attr_residual), dim=1).cpu()
+        else:
+            attributions_old = dl.attribute(
+                (
+                    random1_avs_residual.to(tpcav_model.device),
+                ),
+                baselines=(
+                    random2_avs_residual.to(tpcav_model.device),
+                ),
+                custom_attribution_func=_abs_attribution_func,
+            )
+            attributions_old = attributions_old[0].cpu()
 
         self.assertTrue(
             torch.allclose(attributions.cpu(), attributions_old.cpu(), atol=1e-6),

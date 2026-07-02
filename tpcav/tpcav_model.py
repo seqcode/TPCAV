@@ -42,6 +42,8 @@ class TPCAV(torch.nn.Module):
         self.model.eval()
         self.fitted = False
         self._full_transform = False
+        self.fitting_mode: Optional[str] = None
+        self.implicit_activations: Optional[np.ndarray] = None
         if layer is not None:
             self.layer = Untracked(layer)
             self.layer_name = ""
@@ -174,6 +176,7 @@ class TPCAV(torch.nn.Module):
         self._set_buffer("Vh", Vh.to(self.device) if Vh is not None else None)
         self._set_buffer("orig_shape", torch.tensor(orig_shape).to(self.device))
         self.fitted = True
+        self.fitting_mode = "pca"
 
         logger.info("PCA transformation built.")
         self._evaluate_transformation(all_avs)
@@ -184,6 +187,41 @@ class TPCAV(torch.nn.Module):
             "Vh": Vh,
             "orig_shape": torch.tensor(orig_shape),
         }
+
+    def fit_implicit(
+        self,
+        concepts: Iterable,
+        num_samples_per_concept: int = 10,
+    ) -> None:
+        """Set up zscore normalization and collect concept activations for implicit whitening.
+
+        Call this instead of fit_pca when using the implicit decorrelation method
+        in CavTrainer.train_concepts (ortho_lam > 0). No PCA is computed.
+        """
+        logger.info("Collecting concept activations for implicit whitening.")
+
+        all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
+        orig_shape = all_avs.shape
+        flat = all_avs.flatten(start_dim=1)
+
+        mean = flat.mean(dim=0)
+        std = flat.std(dim=0)
+        std[std == 0] = -1
+        standardized = (flat - mean) / std
+
+        self._set_buffer("zscore_mean", mean.to(self.device))
+        self._set_buffer("zscore_std", std.to(self.device))
+        self._set_buffer("Vh", None)
+        self._set_buffer("orig_shape", torch.tensor(orig_shape).to(self.device))
+        self.fitted = True
+        self._full_transform = False
+        self.fitting_mode = "implicit"
+        self.implicit_activations = standardized.cpu().numpy()
+
+        logger.info(
+            "Implicit whitening setup: %d samples, %d features",
+            flat.shape[0], flat.shape[1],
+        )
 
     def project_activations(
         self, activations: torch.Tensor
@@ -414,7 +452,7 @@ class TPCAV(torch.nn.Module):
         Combine projected/residual embeddings into the layer activation space,
         mirroring scripts/models.py merge logic.
         """
-        if self.Vh is not None:
+        if self.Vh is not None and avs_projected is not None:
             y_hat = torch.matmul(avs_projected, self.Vh) + avs_residual
         else:
             y_hat = avs_residual
@@ -474,7 +512,10 @@ class TPCAV(torch.nn.Module):
         """
         y = layer_output.flatten(start_dim=1)
         y_residual, y_projected = self.project_activations(y)
-        y_pca_all = torch.cat([y_projected, y_residual], dim=1)
+        if y_projected is not None:
+            y_pca_all = torch.cat([y_projected, y_residual], dim=1)
+        else:
+            y_pca_all = y_residual
 
         cavs_matrix = torch.stack(cavs_list, dim=1).to(y.device)  # [dims, #cavs]
 
