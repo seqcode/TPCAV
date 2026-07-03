@@ -1,6 +1,6 @@
 import logging
 from functools import partial
-from typing import Dict, Iterable, List, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -42,6 +42,7 @@ class TPCAV(torch.nn.Module):
         self.model.eval()
         self.fitted = False
         self._full_transform = False
+        self.fitting_mode: Optional[str] = None
         if layer is not None:
             self.layer = Untracked(layer)
             self.layer_name = ""
@@ -127,8 +128,7 @@ class TPCAV(torch.nn.Module):
         self,
         concepts: Iterable,
         num_samples_per_concept: int = 10,
-        num_pc = None,
-        backend = "pca",
+        num_pc: Optional[Union[int, str]] = None,
     ) -> None:
         """
         Sample activations from the provided concepts, compute PCA, and attach
@@ -138,32 +138,6 @@ class TPCAV(torch.nn.Module):
         or "full" to keep all components. If num_pc is 0 or "none", no PCA projection
         will be applied and all activations will be treated as residuals.
         """
-        if backend == "pca":
-            self._fit_pca(
-                concepts,
-                num_samples_per_concept=num_samples_per_concept,
-                num_pc=num_pc,
-            )
-        elif backend == "decorr":
-            self._fit_decorr(
-                concepts,
-                lr=1e-3,
-                max_epochs=100,
-                patience=10,
-                lam_var=1.0,
-                lam_cov=1.0,
-            )
-        else:
-            raise ValueError(f"Unsupported backend {backend}; choose 'pca' or 'decorr'.")
-
-    def _fit_pca(
-        self,
-        concepts: Iterable,
-        num_samples_per_concept: int = 10,
-        num_pc: Optional[Union[int, str]] = None,
-    ) -> Dict[str, torch.Tensor]:
-        """Sample activations, compute PCA, and attach buffers to the model."""
-
         logger.info("Start building PCA transformation.")
 
         all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
@@ -180,11 +154,11 @@ class TPCAV(torch.nn.Module):
         if num_pc is None or num_pc == "full":
             _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
             Vh = torch.tensor(Vh)
-            self._full_transform=True
+            self._full_transform = True
         elif int(num_pc) == 0:
             S = None
             Vh = None
-            self._full_transform=False
+            self._full_transform = False
         else:
             _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
             self._full_transform = False if int(num_pc) < standardized.shape[1] else True
@@ -207,84 +181,96 @@ class TPCAV(torch.nn.Module):
         self._set_buffer("Vh", Vh.to(self.device) if Vh is not None else None)
         self._set_buffer("orig_shape", torch.tensor(orig_shape).to(self.device))
         self.fitted = True
+        self.fitting_mode = "pca"
 
         logger.info("PCA transformation built.")
         self._evaluate_transformation(all_avs)
 
-        return {
-            "zscore_mean": mean,
-            "zscore_std": std,
-            "Vh": Vh,
-            "orig_shape": torch.tensor(orig_shape),
-        }
-
-    def _fit_decorr(
+    def fit_decorr(
         self,
         concepts: Iterable,
+        num_samples_per_concept: int = 50,
         lr: float = 1e-3,
-        max_epochs: int = 100,
-        patience: int = 10,
-        lam_var: float = 1.0,
+        max_epochs: int = 500,
+        max_steps_per_epoch: int = 1000,
+        patience: int = 20,
+        lam_var: float = 0.1,
         lam_cov: float = 1.0,
+        num_dims_sample: Optional[int] = None,
+        batch_size: int = 64,
     ) -> None:
         """
         Alternative to fit_pca using a learned linear decorrelation layer.
 
-        Trains nn.Linear(input_dim, num_pc, bias=False) with a VICReg-style
-        variance + covariance loss on mini-batches, streaming concept activations
-        one batch at a time.  Avoids forming the full activation matrix so there
-        is no LAPACK int32 overflow and no RAM ceiling.
-
-        Sets the same buffers as fit_pca (zscore_mean, zscore_std, Vh, orig_shape)
-        so the rest of the pipeline is unaffected.
+        Collects concept activations then trains nn.Linear(D, D, bias=False) with a
+        VICReg-style variance + covariance loss. Sets the same buffers as fit_pca so
+        the rest of the pipeline is unaffected. Set num_dims_sample to subsample output
+        dimensions when computing the covariance matrix, reducing GPU memory from
+        O(D^2) to O(num_dims_sample^2).
         """
-        # ── Pass 1: probe shape from first batch ─────────────────────────────
-        logger.info("_fit_decorr: training full decorrelation projection")
-        orig_shape = None
-        input_dim  = None
+        logger.info("fit_decorr: collecting concept activations.")
+        all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
+        orig_shape = all_avs.shape
+        flat = all_avs.flatten(start_dim=1).float()
+        N, D = flat.shape
 
-        # ── Pass 2: train decorrelation projection ───────────────────────────
-        proj = None
-        optimizer = None
-        best_loss = None
-        best_weight = None
+        mean = flat.mean(dim=0)
+        std = flat.std(dim=0)
+        std[std == 0] = -1
+        flat = (flat - mean) / std
+
+        self._set_buffer("zscore_mean", mean.to(self.device))
+        self._set_buffer("zscore_std",  std.to(self.device))
+
+        logger.info("fit_decorr: training on %d samples, %d features.", N, D)
+
+        proj = torch.nn.Linear(D, D, bias=False, device=self.device)
+        torch.nn.init.orthogonal_(proj.weight)
+        optimizer = torch.optim.AdamW(proj.parameters(), lr=lr)
+        best_loss: Optional[float] = None
+        best_weight = proj.weight.detach().clone()
         patience_count = 0
 
         for epoch in range(max_epochs):
+            perm = torch.randperm(N)
             epoch_losses = []
-            for batches in zip(*[concept.data_iter for concept in concepts]):
-                flats = []
-                for inputs in batches:
-                    with torch.no_grad():
-                        av = self._layer_output(*[i.to(self.device) for i in inputs]).detach()
-                    if proj is None:
-                        orig_shape = av.shape
-                        input_dim  = int(np.prod(av.shape[1:]))
-                        proj        = torch.nn.Linear(input_dim, input_dim, bias=False, device=self.device)
-                        torch.nn.init.orthogonal_(proj.weight)
-                        optimizer   = torch.optim.AdamW(proj.parameters(), lr=lr)
-                        best_weight = proj.weight.detach().clone()
-                    flats.append(av.flatten(start_dim=1).float())
+            var_losses = []
+            cov_losses = []
 
-                flat = torch.cat(flats, dim=0)
-                z    = proj(flat)
-                N, D = z.shape
-                z_c  = z - z.mean(dim=0)
-                cov  = (z_c.T @ z_c) / (N - 1)
+            for i in range(0, N, batch_size):
+                batch = flat[perm[i:i + batch_size]].to(self.device)
+                z     = proj(batch)
+                n, _  = z.shape
+                z_c   = z - z.mean(dim=0)
+
+                if num_dims_sample is not None and num_dims_sample < D:
+                    dim_idx = torch.randperm(D, device=self.device)[:num_dims_sample]
+                    z_sub   = z_c[:, dim_idx]
+                    k       = num_dims_sample
+                else:
+                    z_sub = z_c
+                    k     = D
+                cov = (z_sub.T @ z_sub) / (n - 1)
 
                 var_loss = torch.relu(1 - cov.diagonal().sqrt()).mean()
-                cov_loss = cov.pow(2).fill_diagonal_(0).sum() / D
+                cov_loss = cov.pow(2).fill_diagonal_(0).sum() / k
                 loss     = lam_var * var_loss + lam_cov * cov_loss
 
                 optimizer.zero_grad()
-                loss.backward()
+                #loss.backward()
+                cov_loss.backward()
                 optimizer.step()
                 epoch_losses.append(loss.item())
+                var_losses.append(var_loss.item())
+                cov_losses.append(cov_loss.item())
 
-            epoch_loss = np.mean(epoch_losses)
-            logger.info(
-                "_fit_decorr epoch %d/%d: loss=%.4f", epoch + 1, max_epochs, epoch_loss
-            )
+                if i > max_steps_per_epoch:
+                    break
+
+            epoch_loss = float(np.mean(epoch_losses))
+            epoch_var_loss = float(np.mean(var_losses))
+            epoch_cov_loss = float(np.mean(cov_losses))
+            logger.info("fit_decorr epoch %d/%d: loss=%.4f, var_loss=%.4f, cov_loss=%.4f", epoch + 1, max_epochs, epoch_loss, epoch_var_loss, epoch_cov_loss)
 
             if best_loss is None or epoch_loss < best_loss:
                 best_loss      = epoch_loss
@@ -293,17 +279,15 @@ class TPCAV(torch.nn.Module):
             else:
                 patience_count += 1
                 if patience_count >= patience:
-                    logger.info("_fit_decorr: early stopping at epoch %d", epoch + 1)
+                    logger.info("fit_decorr: early stopping at epoch %d", epoch + 1)
                     break
 
-        # Vh shape (num_pc, input_dim) matches SVD convention in project_activations.
-        # zscore_mean/std set to 0/1 (no-op) for pipeline compatibility.
-        self._set_buffer("zscore_mean", torch.zeros(input_dim, device=self.device))
-        self._set_buffer("zscore_std",  torch.ones(input_dim,  device=self.device))
-        self._set_buffer("Vh",          best_weight)
-        self._set_buffer("orig_shape",  torch.tensor([1, *orig_shape[1:]], device=self.device))
+        self._set_buffer("Vh", best_weight)
+        self._set_buffer("orig_shape",  torch.tensor(orig_shape).to(self.device))
         self.fitted = True
-        logger.info("_fit_decorr: done.")
+        self.fitting_mode = "decorr"
+        logger.info("fit_decorr: done.")
+        self._evaluate_transformation(all_avs)
 
     def project_activations(
         self, activations: torch.Tensor

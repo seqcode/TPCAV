@@ -887,6 +887,7 @@ def run_tpcav(
     layer=None,
     output_dir: str = "tpcav/",
     num_samples_for_pca=10,
+    num_samples_for_decorr=50,
     num_samples_for_cav=1000,
     input_window_length=1024,
     batch_size=8,
@@ -894,7 +895,9 @@ def run_tpcav(
     bws=None,
     input_transform_func=helper.fasta_chrom_to_one_hot_seq,
     num_pc: Union[str,int]='full',
-    p=1, 
+    fitting_mode: str = "pca",
+    num_dims_sample: Optional[int] = None,
+    p=1,
     max_pending_jobs=4,
     save_cav_trainer=True,
     generate_html_report=True,
@@ -983,12 +986,24 @@ def run_tpcav(
 
     # create TPCAV model on top of the given model
     tpcav_model = TPCAV(model, layer_name=layer_name, layer=layer)
-    # fit PCA on sampled all concept activations of the last builder (should have the most motifs)
-    tpcav_model.fit_pca(
-        concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + non_motif_concept_builder.concepts_for_pca() if non_motif_concept_builder is not None else motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca(),
-        num_samples_per_concept=num_samples_for_pca,
-        num_pc=num_pc,
+
+    assert fitting_mode in ("pca", "decorr"), "fitting_mode must be 'pca' or 'decorr'"
+    fitting_concepts = (
+        motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca()
+        + (non_motif_concept_builder.concepts_for_pca() if non_motif_concept_builder is not None else [])
     )
+    if fitting_mode == "pca":
+        tpcav_model.fit_pca(
+            concepts=fitting_concepts,
+            num_samples_per_concept=num_samples_for_pca,
+            num_pc=num_pc,
+        )
+    else:
+        tpcav_model.fit_decorr(
+            concepts=fitting_concepts,
+            num_samples_per_concept=num_samples_for_decorr,
+            num_dims_sample=num_dims_sample,
+        )
     #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
     # create trainer for computing CAVs

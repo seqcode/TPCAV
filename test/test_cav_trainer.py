@@ -181,6 +181,25 @@ class TPCAVTest(unittest.TestCase):
             output_dir="data/test_run_tpcav_output/",
         )
 
+    def test_run_tpcav_decorr(self):
+        motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
+        genome_fasta = "data/hg38.analysisSet.fa"
+        model = DummyModelSeq()
+        layer_name = "layer1"
+
+        cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
+            model=model,
+            layer_name=layer_name,
+            motif_file=str(motif_path),
+            genome_fasta=genome_fasta,
+            num_motif_insertions=[4, 8],
+            bed_seq_file="data/hg38_rmsk.sample.bed",
+            output_dir="data/test_run_tpcav_output/",
+            fitting_mode='decorr',
+            num_samples_for_decorr=50,
+            num_dims_sample=500
+        )
+
     def test_run_tpcav_no_pca(self):
         motif_path = Path("data") / "motif-clustering-v2.1beta_consensus_pwms.test.meme"
         genome_fasta = "data/hg38.analysisSet.fa"
@@ -299,13 +318,11 @@ class TPCAVTest(unittest.TestCase):
             concepts=builder.concepts_for_pca(),
             num_samples_per_concept=10,
             num_pc="full",
-            backend='pca',
         )
-        tpcav_model.fit_pca(
+        tpcav_model.fit_decorr(
             concepts=builder.concepts_for_pca(),
-            num_samples_per_concept=10,
-            num_pc="full",
-            backend='decorr',
+            num_samples_per_concept=50,
+            num_dims_sample=500,
         )
         torch.save(tpcav_model, "data/tmp_tpcav_model.pt")
 
