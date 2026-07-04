@@ -187,6 +187,9 @@ class TPCAVTest(unittest.TestCase):
         model = DummyModelSeq()
         layer_name = "layer1"
 
+        target_batches   = [(torch.rand(16, 4, 1024),),]
+        baseline_batches = [(torch.rand(16, 4, 1024),),]
+
         cavs_fscores_df, motif_cav_trainers, bed_cav_trainer = run_tpcav(
             model=model,
             layer_name=layer_name,
@@ -197,7 +200,9 @@ class TPCAVTest(unittest.TestCase):
             output_dir="data/test_run_tpcav_output/",
             fitting_mode='decorr',
             num_samples_for_decorr=50,
-            num_dims_sample=500
+            num_dims_sample=500,
+            target_batches=target_batches,
+            baseline_batches=baseline_batches,
         )
 
     def test_run_tpcav_no_pca(self):

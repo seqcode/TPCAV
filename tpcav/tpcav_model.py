@@ -4,7 +4,7 @@ from typing import Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
-from captum.attr import DeepLift
+from captum.attr import DeepLift, LayerDeepLift
 from scipy.linalg import svd
 
 logger = logging.getLogger(__name__)
@@ -194,10 +194,14 @@ class TPCAV(torch.nn.Module):
         max_epochs: int = 500,
         max_steps_per_epoch: int = 1000,
         patience: int = 20,
-        lam_var: float = 0.1,
+        lam_var: float = 1e-4,
         lam_cov: float = 1.0,
         num_dims_sample: Optional[int] = None,
         batch_size: int = 64,
+        target_batches: Optional[Iterable] = None,
+        baseline_batches: Optional[Iterable] = None,
+        weight_power: float = 2.0,
+        weight_floor: float = 1.0,
     ) -> None:
         """
         Alternative to fit_pca using a learned linear decorrelation layer.
@@ -207,6 +211,13 @@ class TPCAV(torch.nn.Module):
         the rest of the pipeline is unaffected. Set num_dims_sample to subsample output
         dimensions when computing the covariance matrix, reducing GPU memory from
         O(D^2) to O(num_dims_sample^2).
+
+        target_batches / baseline_batches: when both are provided, DeepLift attributions
+            on the raw layer activations (via raw_layer_attributions) are used to derive
+            per-dimension importance weights. weight_power amplifies contrast between
+            dimensions (2.0 = square). weight_floor is added after normalization so every
+            dimension retains a minimum weight, preventing low-attribution dims from being
+            ignored entirely.
         """
         logger.info("fit_decorr: collecting concept activations.")
         all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
@@ -222,6 +233,19 @@ class TPCAV(torch.nn.Module):
         self._set_buffer("zscore_mean", mean.to(self.device))
         self._set_buffer("zscore_std",  std.to(self.device))
 
+        # ── Dimension importance weights from DeepLift attributions ──────────
+        dim_weights: Optional[torch.Tensor] = None
+        if target_batches is not None and baseline_batches is not None:
+            logger.info("fit_decorr: computing dimension importance weights from DeepLift attributions.")
+            attrs = self.raw_layer_attributions(target_batches, baseline_batches)  # (N, D)
+            importance = attrs.abs().mean(dim=0).to(self.device).pow(weight_power)
+            dim_weights = (importance / importance.mean().clamp(min=1e-8) + weight_floor).detach()
+            logger.info(
+                "fit_decorr: dimension weights computed; max=%.3f, min=%.3f",
+                dim_weights.max().item(), dim_weights.min().item(),
+            )
+
+        # ── Training ──────────────────────────────────────────────────────────
         logger.info("fit_decorr: training on %d samples, %d features.", N, D)
 
         proj = torch.nn.Linear(D, D, bias=False, device=self.device)
@@ -247,18 +271,23 @@ class TPCAV(torch.nn.Module):
                     dim_idx = torch.randperm(D, device=self.device)[:num_dims_sample]
                     z_sub   = z_c[:, dim_idx]
                     k       = num_dims_sample
+                    w_sub   = dim_weights[dim_idx] if dim_weights is not None else None
                 else:
-                    z_sub = z_c
-                    k     = D
+                    z_sub  = z_c
+                    k      = D
+                    w_sub  = dim_weights
                 cov = (z_sub.T @ z_sub) / (n - 1)
 
-                var_loss = torch.relu(1 - cov.diagonal().sqrt()).mean()
-                cov_loss = cov.pow(2).fill_diagonal_(0).sum() / k
-                loss     = lam_var * var_loss + lam_cov * cov_loss
+                if w_sub is not None:
+                    var_loss = (torch.relu(1 - cov.diagonal().sqrt()) * w_sub).mean()
+                    cov_loss = (cov.pow(2).fill_diagonal_(0) * (w_sub[:, None] * w_sub[None, :])).sum() / k
+                else:
+                    var_loss = torch.relu(1 - cov.diagonal().sqrt()).mean()
+                    cov_loss = cov.pow(2).fill_diagonal_(0).sum() / k
+                loss = lam_var * var_loss + lam_cov * cov_loss
 
                 optimizer.zero_grad()
-                #loss.backward()
-                cov_loss.backward()
+                loss.backward()
                 optimizer.step()
                 epoch_losses.append(loss.item())
                 var_losses.append(var_loss.item())
@@ -418,6 +447,37 @@ class TPCAV(torch.nn.Module):
 
         return torch.cat(attributions)
 
+    def raw_layer_attributions(
+        self,
+        target_batches: Iterable,
+        baseline_batches: Iterable,
+        multiply_by_inputs: bool = True,
+    ) -> torch.Tensor:
+        """
+        Compute DeepLift attributions directly on raw (un-projected) layer activations.
+
+        Unlike layer_attributions, this does not require fit_pca or fit_decorr to have
+        been called. Returns a tensor of shape (N, D) where D is the flattened layer
+        output size.
+        """
+        self.forward = self.forward_patched_tensor
+        deeplift = LayerDeepLift(self, multiply_by_inputs=multiply_by_inputs, layer=self.layer.module)
+
+        attributions = []
+        for inputs, binputs in zip(target_batches, baseline_batches):
+
+            attribution = deeplift.attribute(
+                tuple([i.to(self.device) for i in inputs]),
+                baselines=tuple([bi.to(self.device) for bi in binputs]),
+            )
+            attributions.append(attribution.detach().cpu())
+
+            with torch.no_grad():
+                del inputs, binputs
+                torch.cuda.empty_cache()
+
+        return torch.cat(attributions).flatten(start_dim=1)
+
     def input_attributions(
         self,
         target_batches: Iterable,
@@ -540,7 +600,7 @@ class TPCAV(torch.nn.Module):
 
     def forward_patched(
         self,
-        model_inputs: Tuple[torch.Tensor, Optional[torch.Tensor]],
+        model_inputs: Union[torch.Tensor, Tuple[torch.Tensor, Optional[torch.Tensor]]],
         layer_activation: Optional[torch.Tensor] = None,
         cavs_list: Optional[List[torch.Tensor]] = None,
         mute_x_avs: bool = False,

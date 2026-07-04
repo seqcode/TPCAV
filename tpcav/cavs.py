@@ -897,6 +897,10 @@ def run_tpcav(
     num_pc: Union[str,int]='full',
     fitting_mode: str = "pca",
     num_dims_sample: Optional[int] = None,
+    target_batches=None,
+    baseline_batches=None,
+    weight_power: float = 2.0,
+    weight_floor: float = 1.0,
     p=1,
     max_pending_jobs=4,
     save_cav_trainer=True,
@@ -1003,6 +1007,10 @@ def run_tpcav(
             concepts=fitting_concepts,
             num_samples_per_concept=num_samples_for_decorr,
             num_dims_sample=num_dims_sample,
+            target_batches=target_batches,
+            baseline_batches=baseline_batches,
+            weight_power=weight_power,
+            weight_floor=weight_floor,
         )
     #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
