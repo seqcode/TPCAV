@@ -117,6 +117,7 @@ class TPCAVTest(unittest.TestCase):
             bed_seq_file="data/hg38_rmsk.sample.bed",
             synthetic_gc_concept_step=0.1,
             output_dir="data/test_run_tpcav_output/",
+            num_samples_for_pca=None
         )
 
         random_regions_1 = helper.random_regions_dataframe(

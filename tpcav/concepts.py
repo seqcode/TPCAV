@@ -300,7 +300,8 @@ class ConceptBuilder:
                 )
                 continue
             seq_fasta_iter = helper.DataFrame2FastaIterator(
-                concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
+                #concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
+                concept_df,
                 self.genome_fasta,
                 batch_size=self.batch_size,
             )
@@ -340,7 +341,8 @@ class ConceptBuilder:
                 )
                 continue
             chrom_dl = helper.DataFrame2ChromTracksIterator(
-                concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
+                #concept_df.sample(n=self.min_samples, random_state=self.rng_seed),
+                concept_df,
                 self.bws,
                 batch_size=self.batch_size,
             )

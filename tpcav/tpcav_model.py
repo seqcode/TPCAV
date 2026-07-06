@@ -1,5 +1,6 @@
 import logging
 from functools import partial
+import math
 from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
@@ -91,6 +92,9 @@ class TPCAV(torch.nn.Module):
 
     def _collect_concept_examples(self, concepts, num_samples_per_concept: int) -> torch.Tensor:
         """Collect concept examples from each concept and return as a single tensor."""
+        if not isinstance(concepts, list):
+            concepts = [concepts,]
+
         sampled_avs = []
         for concept in concepts:
             avs = self._sample_concept(concept, num_samples=num_samples_per_concept)
@@ -126,12 +130,21 @@ class TPCAV(torch.nn.Module):
     def fit_pca(
         self,
         concepts: Iterable,
-        num_samples_per_concept: int = 10,
+        num_samples_per_concept: Optional[int] = 10,
         num_pc: Optional[Union[int, str]] = None,
     ) -> Dict[str, torch.Tensor]:
         """Sample activations, compute PCA, and attach buffers to the model."""
 
         logger.info("Start building PCA transformation.")
+
+        concepts = list(concepts)
+
+        # sample a few samples to determine what's the maximum number of samples we can have for each concept to get PCA as complete as possible
+        if not num_samples_per_concept:
+            sample_avs = self._sample_concept(concepts[0], num_samples=4)
+            num_embed_dims = sample_avs.flatten(start_dim=1).shape[1]
+            num_samples_per_concept = math.floor(math.pow(2, 31)/(num_embed_dims * len(concepts)))
+            logger.info(f"# samples per concept is set as {num_samples_per_concept}")
 
         all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
         orig_shape = all_avs.shape
