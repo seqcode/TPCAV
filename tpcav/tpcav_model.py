@@ -109,7 +109,7 @@ class TPCAV(torch.nn.Module):
         if not self.fitted:
             raise RuntimeError("Call fit_pca before evaluating transformation.")
         activations_flat = activations.flatten(start_dim=1)
-        avs_residual, avs_projected = self.project_activations(activations_flat)
+        avs_residual, avs_projected = self.project_activations(activations_flat, device='cpu')
 
         # subsample dimensions for correlation evaluation if there are too many
         def compute_mean_abs_corr(tensor):
@@ -199,7 +199,7 @@ class TPCAV(torch.nn.Module):
         }
 
     def project_activations(
-        self, activations: torch.Tensor
+        self, activations: torch.Tensor, device=None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """Project flattened activations into PCA space and residual."""
         if not self.fitted:
@@ -207,14 +207,14 @@ class TPCAV(torch.nn.Module):
                 "PCA not fit before projecting activations, make sure this is intended"
             )
 
-        y = activations.flatten(start_dim=1).to(self.device)
+        y = activations.flatten(start_dim=1).to(device or self.device)
         if self.Vh is not None:
-            V = self.Vh.T
-            zscore_mean = getattr(self, "zscore_mean", 0.0)
-            zscore_std = getattr(self, "zscore_std", 1.0)
+            V = self.Vh.T.to(device or self.device)
+            zscore_mean = getattr(self, "zscore_mean", torch.tensor(0.0)).to(device or self.device)
+            zscore_std = getattr(self, "zscore_std", torch.tensor(1.0)).to(device or self.device)
             y_standardized = (y - zscore_mean) / zscore_std
             y_projected = torch.matmul(y_standardized, V)
-            y_residual = y_standardized - torch.matmul(y_projected, self.Vh)
+            y_residual = y_standardized - torch.matmul(y_projected, self.Vh.to(device or self.device))
             return y_residual, y_projected
         else:
             return y, None
