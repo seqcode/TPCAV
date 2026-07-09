@@ -413,6 +413,17 @@ def generate_tpcav_html_report(
                 preview = "\n".join(f"{k}\t{v}" for k, v in pairs[:200])
                 table_html = f"<pre>{_html.escape(preview)}</pre>"
 
+        safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', str(name))
+        table_id = f"table_trainer_{safe_name}"
+        if table_html:
+            wrapped_table = (
+                f"<div class='dlbar'><button class='btn' type='button' "
+                f"onclick=\"downloadTableAsCsv('{table_id}', 'cav_fscores_{safe_name}')\">Download CSV</button></div>"
+                f"<div class='table-scroll' id='{table_id}'>{table_html}</div>"
+            )
+        else:
+            wrapped_table = "<div class='muted'>(no cav_fscores found)</div>"
+
         trainer_sections.append(
             "\n".join(
                 [
@@ -420,7 +431,7 @@ def generate_tpcav_html_report(
                     _render_kv_table(meta_rows),
                     "<details class='details'>",
                     "<summary class='muted'>CAV F-scores</summary>",
-                    table_html or "<div class='muted'>(no cav_fscores found)</div>",
+                    wrapped_table,
                     "</details>",
                     "</div>",
                 ]
@@ -811,9 +822,11 @@ def generate_tpcav_html_report(
 			      <h2>Concepts</h2>
 			      <div class="muted">Motif concepts are listed first (ranked), then any additional concepts.</div>
 			      <h3>Motif Concepts</h3>
-			      <div class="table-scroll">{motif_table_html or "<div class='muted'>(no motif concepts)</div>"}</div>
+			      <div class="dlbar"><button class="btn" type="button" onclick="downloadTableAsCsv('table_motif_concepts', 'motif_concepts')">Download CSV</button></div>
+			      <div class="table-scroll" id="table_motif_concepts">{motif_table_html or "<div class='muted'>(no motif concepts)</div>"}</div>
 		      <h3>Non-motif Concepts</h3>
-		      <div class="table-scroll">{extra_table_html or "<div class='muted'>(no non-motif concepts)</div>"}</div>
+		      <div class="dlbar"><button class="btn" type="button" onclick="downloadTableAsCsv('table_nonmotif_concepts', 'nonmotif_concepts')">Download CSV</button></div>
+		      <div class="table-scroll" id="table_nonmotif_concepts">{extra_table_html or "<div class='muted'>(no non-motif concepts)</div>"}</div>
 			      <ol class="concepts">
 			        {concepts_html}
 			      </ol>
@@ -823,7 +836,8 @@ def generate_tpcav_html_report(
 			      <h2>Motif Ranking</h2>
 			      <div id="motif_auc_plots" class="plot plot--short"></div>
 			      {motif_auc_fig_html}
-			      <div class="table-scroll">{motif_auc_table_html or "<div class='muted'>(no motif ranking table)</div>"}</div>
+			      <div class="dlbar"><button class="btn" type="button" onclick="downloadTableAsCsv('table_motif_auc', 'motif_auc_ranking')">Download CSV</button></div>
+			      <div class="table-scroll" id="table_motif_auc">{motif_auc_table_html or "<div class='muted'>(no motif ranking table)</div>"}</div>
 			    </section>
 	
 		    <section>
@@ -1028,6 +1042,36 @@ def generate_tpcav_html_report(
               downloadPdf();
             }});
           }}
+
+	      window.downloadTableAsCsv = function(tableScrollId, filename) {{
+	        const container = document.getElementById(tableScrollId);
+	        if (!container) return;
+	        const table = container.querySelector('table');
+	        if (!table) return;
+	        function cellText(el) {{
+	          const text = (el.innerText || '').trim();
+	          if (!text) {{
+	            const img = el.querySelector('img');
+	            return img ? (img.alt || '') : '';
+	          }}
+	          return text;
+	        }}
+	        const rows = [];
+	        const ths = table.querySelectorAll('thead th');
+	        if (ths.length) rows.push(Array.from(ths).map(th => JSON.stringify(cellText(th))).join(','));
+	        table.querySelectorAll('tbody tr').forEach(tr => {{
+	          rows.push(Array.from(tr.querySelectorAll('td')).map(td => JSON.stringify(cellText(td))).join(','));
+	        }});
+	        const blob = new Blob([rows.join('\\n')], {{type: 'text/csv'}});
+	        const url = URL.createObjectURL(blob);
+	        const a = document.createElement('a');
+	        a.href = url;
+	        a.download = filename + '.csv';
+	        document.body.appendChild(a);
+	        a.click();
+	        document.body.removeChild(a);
+	        URL.revokeObjectURL(url);
+	      }};
 
 	      function linreg(xs, ys) {{
 	        const n = xs.length;
