@@ -194,7 +194,7 @@ motif_cav_trainers[4].cav_weights
 You can also retrieve the model decorated by TPCAV parameters by
 
 ```python
-tpcav_mode = cav_trainer.tpcav
+tpcav_model = cav_trainer.tpcav
 ```
 
 So that you can compute attributions for new inputs
