@@ -12,11 +12,13 @@ from typing import Iterable, List, Optional
 import numpy as np
 import pandas as pd
 import pyBigWig
+import pybedtools
 import seqchromloader as scl
 import torch
+from Bio.Seq import reverse_complement
 from deeplift.dinuc_shuffle import dinuc_shuffle
 from pyfaidx import Fasta
-from seqchromloader.utils import dna2OneHot, extract_bw, BigWigInaccessible
+from seqchromloader.utils import dna2OneHot, extract_bw
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +27,27 @@ def load_bed_and_center(bed_file: str, window: int) -> pd.DataFrame:
     """
     Load a BED file and center the regions to a fixed window size.
     """
-    bed_df = pd.read_table(bed_file, usecols=[0, 1, 2], names=["chrom", "start", "end"])
+    bed_df = pybedtools.BedTool(bed_file).to_dataframe()
     return center_dataframe_regions(bed_df, window)
+
+def bed_to_chrom_tracks_iter(
+    bed_file: str, genome_fasta: str, bigwigs: List[str]
+) -> Iterable[torch.Tensor]:
+    """
+    Yield chromatin tracks for BED regions using bigwig files.
+    Each batch is shaped [batch, num_tracks, window].
+    """
+    bed_df = pybedtools.BedTool(bed_file).to_dataframe()
+    yield from dataframe_to_chrom_tracks_iter(bed_df, genome_fasta, bigwigs)
+
+def bed_to_fasta_iter(
+    bed_file: str, genome_fasta: str, batch_size: int
+) -> Iterable[List[str]]:
+    """
+    Yield sequences from a BED file as fasta strings.
+    """
+    bed_df = pybedtools.BedTool(bed_file).to_dataframe()
+    yield from dataframe_to_fasta_iter(bed_df, genome_fasta, batch_size)
 
 
 def center_dataframe_regions(df: pd.DataFrame, window: int) -> pd.DataFrame:
@@ -44,17 +65,6 @@ def center_dataframe_regions(df: pd.DataFrame, window: int) -> pd.DataFrame:
     df = df[cols]
     return df
 
-
-def bed_to_fasta_iter(
-    bed_file: str, genome_fasta: str, batch_size: int
-) -> Iterable[List[str]]:
-    """
-    Yield sequences from a BED file as fasta strings.
-    """
-    bed_df = pd.read_table(bed_file, usecols=[0, 1, 2], names=["chrom", "start", "end"])
-    yield from dataframe_to_fasta_iter(bed_df, genome_fasta, batch_size)
-
-
 def dataframe_to_fasta_iter(
     df: pd.DataFrame, genome_fasta: str, batch_size: int, drop_last=True
 ) -> Iterable[List[str]]:
@@ -69,6 +79,9 @@ def dataframe_to_fasta_iter(
             raise ValueError(
                 f"Extract Fasta sequence length mismatch with region coordinate length {row.chrom}:{row.start}-{row.end}"
             )
+        if hasattr(row, 'strand'):
+            if row.strand == '-':
+                seq = reverse_complement(seq)
         fasta_seqs.append(seq)
         if len(fasta_seqs) == batch_size:
             yield fasta_seqs
@@ -91,18 +104,6 @@ class DataFrame2FastaIterator:
         return dataframe_to_fasta_iter(
             self.df, genome_fasta=self.genome_fasta, batch_size=self.batch_size
         )
-
-
-def bed_to_chrom_tracks_iter(
-    bed_file: str, genome_fasta: str, bigwigs: List[str]
-) -> Iterable[torch.Tensor]:
-    """
-    Yield chromatin tracks for BED regions using bigwig files.
-    Each batch is shaped [batch, num_tracks, window].
-    """
-    bed_df = pd.read_table(bed_file, usecols=[0, 1, 2], names=["chrom", "start", "end"])
-    yield from dataframe_to_chrom_tracks_iter(bed_df, genome_fasta, bigwigs)
-
 
 def dataframe_to_chrom_tracks_iter(
     df: pd.DataFrame,
