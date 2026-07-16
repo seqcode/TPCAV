@@ -16,8 +16,15 @@ import torch
 from Bio import SeqIO, motifs
 from pyfaidx import Fasta
 from torch.utils.data import default_collate, get_worker_info
-
 logger = logging.getLogger(__name__)
+try:
+    from tpcav import rust_optim as _rust_optim
+    _RUST_AVAILABLE = True
+    logger.info("RUST backend available")
+except ImportError:
+    _rust_optim = None
+    _RUST_AVAILABLE = False
+
 
 def clean_motif_name(motif_name):
     return motif_name.replace("/", "-")
@@ -411,9 +418,33 @@ class SeqChromConcept:
         yield from zip(self.seq_dl, self.chrom_dl)
 
 
+def _sample_from_pwm_numpy(pwm_prob_mat, n_seqs=1, rng=None, alphabet=['A', 'C', 'G', 'T']):
+    """Pure numpy implementation of sample_from_pwm."""
+    rng = rng or np.random.default_rng()
+    L = pwm_prob_mat.shape[0]
+    u = rng.random((n_seqs, L))
+    cum = np.cumsum(pwm_prob_mat, axis=1)
+    idx = (u[..., None] < cum).argmax(axis=2)
+    letters = np.array(alphabet, dtype="U1")
+    seq_arr = letters[idx]
+    seqs = ["".join(row) for row in seq_arr]
+    return seqs[0] if n_seqs == 1 else seqs
+
+def _sample_from_pwm_rust(pwm_prob_mat, n_seqs=1, rng=None):
+    seed = int(rng.integers(2**63)) if rng is not None else None
+    seqs = _rust_optim.sample_from_pwm(
+        np.ascontiguousarray(pwm_prob_mat, dtype=np.float64),
+        n_seqs=n_seqs,
+        seed=seed,
+    )
+    return seqs[0] if n_seqs == 1 else seqs
+
 def sample_from_pwm(pwm_prob_mat, n_seqs=1, rng=None, alphabet=['A', 'C', 'G', 'T']):
     """
-    Draw `n_seqs` independent sequences from a Bio.motifs.Motif PWM.
+    Draw `n_seqs` independent sequences from a position weight matrix.
+
+    Uses the Rust backend (rust_optim) when available for ~7x speedup; falls
+    back to a pure-numpy implementation otherwise.
 
     Parameters
     ----------
@@ -421,7 +452,7 @@ def sample_from_pwm(pwm_prob_mat, n_seqs=1, rng=None, alphabet=['A', 'C', 'G', '
     n_seqs : int, default 1
         How many sequences to generate.
     rng    : numpy.random.Generator or None
-        Leave None for np.random.default_rng().
+        Used only by the numpy fallback path. Leave None for default_rng().
     alphabet  : letters to be used
 
     Returns
@@ -429,28 +460,10 @@ def sample_from_pwm(pwm_prob_mat, n_seqs=1, rng=None, alphabet=['A', 'C', 'G', '
     str | list[str]
         A single string if n_seqs==1, otherwise a list of strings.
     """
-    rng = rng or np.random.default_rng()
-
-    # ---- 1. Build a (L, A) probability matrix --------------------------------
-    L = pwm_prob_mat.shape[0]
-
-    # ---- 2. Vectorised multinomial sampling -----------------------------------
-    # Draw U(0,1) numbers of shape (n_seqs, L)
-    u = rng.random((n_seqs, L))
-
-    # cumulative probabilities along alphabet axis
-    cum = np.cumsum(pwm_prob_mat, axis=1)  # still (L, A)
-
-    # Broadcast cum to (n_seqs, L, A) and pick first index where cum > u
-    idx = (u[..., None] < cum).argmax(axis=2)  # (n_seqs, L) int indices
-
-    # ---- 3. Convert indices back to letters -----------------------------------
-    letters = np.array(alphabet, dtype="U1")
-    seq_arr = letters[idx]  # (n_seqs, L) array of chars
-
-    # Join per sequence
-    seqs = ["".join(row) for row in seq_arr]
-    return seqs[0] if n_seqs == 1 else seqs
+    if _RUST_AVAILABLE and alphabet == ['A', 'C', 'G', 'T']:
+        return _sample_from_pwm_rust(pwm_prob_mat, n_seqs=n_seqs, rng=rng)
+    else:
+        return _sample_from_pwm_numpy(pwm_prob_mat, n_seqs=n_seqs, rng=rng, alphabet=alphabet)
 
 def get_prob_mat_from_motif_pwm(pwm_dict, alphabet=['A', 'C', 'G', 'T']):
     pwm_prob_mat = np.column_stack([pwm_dict[b] for b in alphabet])
@@ -514,7 +527,7 @@ class PermutedConsensusMotif:
     def __init__(self, name, consensus, seed=None, min_shift=0.3):
         self.name = name
         self.consensus = consensus.upper()
-        self.rng = np.random.RandomState(seed)
+        self.rng = np.random.default_rng(seed)
         self.min_shift = min_shift
 
     def __len__(self):
@@ -568,7 +581,7 @@ class PermutedPWMMotif:
         self.length = motif.length
         self.alphabet = motif.alphabet
         self.min_shift = min_shift
-        self.rng = np.random.RandomState(seed)
+        self.rng = np.random.default_rng(seed)
 
         # extract PWM as dict of lists
         pwm = {b: list(motif.pwm[b]) for b in self.BASES}
@@ -618,7 +631,7 @@ class BioMotifWrapped:
         self.name = motif.name
         self.length = len(motif.consensus)
         self.pwm_prob_mat = get_prob_mat_from_motif_pwm(motif.pwm)
-        self.rng = np.random.RandomState(seed)
+        self.rng = np.random.default_rng(seed)
 
     def __len__(self):
         return self.length

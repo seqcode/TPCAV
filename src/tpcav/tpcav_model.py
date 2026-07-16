@@ -127,24 +127,42 @@ class TPCAV(torch.nn.Module):
         if avs_projected is not None:
             logger.info("Mean absolute pearson correlation on projected activations after transformation: %.4f", compute_mean_abs_corr(avs_projected))
 
+    @staticmethod
+    def _svd_thin(standardized: torch.Tensor, backend: str = "scipy"):
+        """Thin SVD returning (S, Vh). backend: 'scipy' or 'rust'."""
+        if backend == "rust":
+            from tpcav import rust_optim
+            # Pass F-order (column-major) so faer ingests it zero-copy.
+            # Keep f32 to match scipy's sgesvd path and avoid a 2-4x slowdown.
+            S, Vh = rust_optim.svd_thin(np.asfortranarray(standardized.numpy()))
+        else:
+            _, S, Vh = svd(standardized.numpy(), full_matrices=False)
+        return S, Vh
+
     def fit_pca(
         self,
         concepts: Iterable,
         num_samples_per_concept: Optional[int] = 10,
         num_pc: Optional[Union[int, str]] = None,
+        svd_backend: str = "scipy",
     ) -> Dict[str, torch.Tensor]:
-        """Sample activations, compute PCA, and attach buffers to the model."""
+        """Sample activations, compute PCA, and attach buffers to the model.
+
+        svd_backend: 'scipy' (default) or 'rust' (uses faer via rust_optim extension).
+        """
 
         logger.info("Start building PCA transformation.")
 
         concepts = list(concepts)
 
         # sample a few samples to determine what's the maximum number of samples we can have for each concept to get PCA as complete as possible
+        sample_avs = self._sample_concept(concepts[0], num_samples=4)
+        num_embed_dims = sample_avs.flatten(start_dim=1).shape[1]
+        max_samples_per_concept = math.floor(math.pow(2, 31)/(num_embed_dims * len(concepts)))
+        logger.info(f"max # samples per concept is {max_samples_per_concept}, # dims is {num_embed_dims}")
+
         if not num_samples_per_concept:
-            sample_avs = self._sample_concept(concepts[0], num_samples=4)
-            num_embed_dims = sample_avs.flatten(start_dim=1).shape[1]
-            num_samples_per_concept = math.floor(math.pow(2, 31)/(num_embed_dims * len(concepts)))
-            logger.info(f"# samples per concept is set as {num_samples_per_concept}")
+            num_samples_per_concept = max_samples_per_concept
 
         all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
         orig_shape = all_avs.shape
@@ -158,7 +176,7 @@ class TPCAV(torch.nn.Module):
         standardized = (flat - mean) / std
 
         if num_pc is None or num_pc == "full":
-            _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
+            S, Vh = self._svd_thin(standardized, backend=svd_backend)
             Vh = torch.tensor(Vh)
             self._full_transform=True
         elif int(num_pc) == 0:
@@ -166,7 +184,7 @@ class TPCAV(torch.nn.Module):
             Vh = None
             self._full_transform=False
         else:
-            _, S, Vh = svd(standardized, lapack_driver="gesvd", full_matrices=False)
+            S, Vh = self._svd_thin(standardized, backend=svd_backend)
             self._full_transform = False if int(num_pc) < standardized.shape[1] else True
             Vh = torch.tensor(Vh[: int(num_pc)])
 

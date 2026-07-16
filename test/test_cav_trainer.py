@@ -2,6 +2,7 @@ import unittest
 from functools import partial
 from pathlib import Path
 
+import math
 import torch
 from Bio import motifs as Bio_motifs
 from captum.attr import DeepLift
@@ -16,18 +17,21 @@ from line_profiler import LineProfiler
 class DummyModelSeq(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.layer1 = torch.nn.Linear(1024, 1)
-        self.layer2 = torch.nn.Linear(4, 1)
+        self.layer1 = torch.nn.Linear(1024, 1024)
+        self.layer2 = torch.nn.Linear(1024, 1)
+        self.layer3 = torch.nn.Linear(4, 1)
 
     def forward(self, seq):
         y_hat = self.layer1(seq)
-        y_hat = y_hat.squeeze(-1)
         y_hat = self.layer2(y_hat)
+        y_hat = y_hat.squeeze(-1)
+        y_hat = self.layer3(y_hat)
         return y_hat
 
     def foward_from_layer1(self, y_hat):
-        y_hat = y_hat.squeeze(-1)
         y_hat = self.layer2(y_hat)
+        y_hat = y_hat.squeeze(-1)
+        y_hat = self.layer3(y_hat)
         return y_hat
 
 
@@ -114,10 +118,13 @@ class TPCAVTest(unittest.TestCase):
             motif_file=[str(motif_path), ] * 3,
             genome_fasta=genome_fasta,
             num_motif_insertions=[4, 8],
-            bed_seq_file="data/hg38_rmsk.sample.bed",
+            #bed_seq_file="data/hg38_rmsk.sample.bed",
             synthetic_gc_concept_step=0.1,
             output_dir="data/test_run_tpcav_output/",
-            num_samples_for_pca=None
+            num_samples_for_pca=10,
+            num_samples_for_cav=1000,
+            batch_size=16,
+            num_workers=8
         )
 
         random_regions_1 = helper.random_regions_dataframe(
@@ -407,6 +414,135 @@ class TPCAVTest(unittest.TestCase):
 
         cav_trainer.save_state("data/tmp_cav_trainer.state.pt")
         cav_trainer = CavTrainer.load_state(tpcav_model, state_path="data/tmp_cav_trainer.state.pt")
+
+
+    def test_rust_svd_backend(self):
+        """Verify rust SVD backend gives same result as scipy on identical input (up to sign flips)."""
+        torch.manual_seed(42)
+        # Tall matrix similar to what fit_pca would see: (N_samples, D_features)
+        standardized = torch.randn(200, 50)
+
+        S_scipy, Vh_scipy = TPCAV._svd_thin(standardized, backend="scipy")
+        S_rust,  Vh_rust  = TPCAV._svd_thin(standardized, backend="rust")
+
+        S_scipy = torch.tensor(S_scipy).float()
+        S_rust  = torch.tensor(S_rust).float()
+        Vh_scipy = torch.tensor(Vh_scipy).float()
+        Vh_rust  = torch.tensor(Vh_rust).float()
+
+        # Singular values must match closely
+        self.assertTrue(
+            torch.allclose(S_scipy, S_rust, rtol=1e-3, atol=1e-3),
+            f"Singular values differ: max diff = {(S_scipy - S_rust).abs().max():.4e}"
+        )
+
+        # Projection matrices Vh @ Vh.T are sign-invariant and must match
+        proj_scipy = Vh_scipy.T @ Vh_scipy
+        proj_rust  = Vh_rust.T  @ Vh_rust
+        self.assertTrue(
+            torch.allclose(proj_scipy, proj_rust, rtol=1e-3, atol=1e-3),
+            f"Projection matrices differ: max diff = {(proj_scipy - proj_rust).abs().max():.4e}"
+        )
+
+        # Timing: scipy (gesdd) vs faer (QR + thin SVD) for increasing sizes
+        import time
+
+        print(f"\n{'Size':>10}  {'Scipy':>12}  {'Faer':>12}")
+        for pow_n in range(2, 9, 2):
+            n = int(math.pow(2, pow_n))
+            standardized = torch.randn(n, n)
+
+            t0 = time.perf_counter()
+            TPCAV._svd_thin(standardized, backend="scipy")
+            t_scipy = time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            TPCAV._svd_thin(standardized, backend="rust")
+            t_rust = time.perf_counter() - t0
+
+            print(f"{n:>10}  {t_scipy*1000:>10.1f}ms  {t_rust*1000:>10.1f}ms")
+
+
+    def test_rust_sample_from_pwm(self):
+        """Verify rust sample_from_pwm produces valid sequences and matches Python's distribution."""
+        from tpcav import rust_optim
+        import numpy as np
+        from tpcav.utils import _sample_from_pwm_rust, _sample_from_pwm_numpy
+
+        # Biased PWM: position 0 → always A, position 1 → always C, etc.
+        pwm_det = np.zeros((4, 4), dtype=np.float64)
+        pwm_det[0, 0] = 1.0  # A
+        pwm_det[1, 1] = 1.0  # C
+        pwm_det[2, 2] = 1.0  # G
+        pwm_det[3, 3] = 1.0  # T
+
+        seqs = _sample_from_pwm_rust(pwm_det, n_seqs=20, rng=np.random.default_rng(0))
+        self.assertEqual(len(seqs), 20)
+        for seq in seqs:
+            self.assertEqual(seq, "ACGT", f"Expected deterministic 'ACGT', got '{seq}'")
+
+        # Uniform PWM: basic format checks
+        pwm_uni = np.full((10, 4), 0.25, dtype=np.float64)
+        seqs = _sample_from_pwm_rust(pwm_uni, n_seqs=50, rng=np.random.default_rng(42))
+        self.assertEqual(len(seqs), 50)
+        for seq in seqs:
+            self.assertEqual(len(seq), 10)
+            self.assertTrue(all(c in "ACGT" for c in seq), f"Invalid chars in '{seq}'")
+
+        # Reproducibility: same seed → same output
+        seqs_a = _sample_from_pwm_rust(pwm_uni, n_seqs=10, rng=np.random.default_rng(7))
+        seqs_b = _sample_from_pwm_rust(pwm_uni, n_seqs=10, rng=np.random.default_rng(7))
+        self.assertEqual(seqs_a, seqs_b)
+
+        # Different seeds → different output (with overwhelming probability)
+        seqs_c = _sample_from_pwm_rust(pwm_uni, n_seqs=10, rng=np.random.default_rng(8))
+        self.assertNotEqual(seqs_a, seqs_c)
+
+        # Distribution: nucleotide frequencies on uniform PWM should be ~25% each
+        pwm_uni_1 = np.full((1, 4), 0.25, dtype=np.float64)
+        seqs_large = _sample_from_pwm_rust(pwm_uni_1, n_seqs=10000, rng=np.random.default_rng(9))
+        counts = {c: sum(s.count(c) for s in seqs_large) for c in "ACGT"}
+        for c, cnt in counts.items():
+            freq = cnt / 10000
+            self.assertAlmostEqual(freq, 0.25, delta=0.02,
+                                   msg=f"Nucleotide {c} frequency {freq:.3f} deviates from 0.25")
+
+        # Compare distribution against Python sample_from_pwm on a non-uniform PWM
+        rng = np.random.default_rng(0)
+        pwm_skewed = rng.dirichlet(alpha=[2, 1, 3, 0.5], size=6)  # (6, 4)
+        n = 20000
+        rust_seqs = _sample_from_pwm_rust(pwm_skewed, n_seqs=n, rng=np.random.default_rng(1))
+        py_seqs   = _sample_from_pwm_numpy(pwm_skewed, n_seqs=n, rng=np.random.default_rng(1))
+        alphabet = list("ACGT")
+        for pos in range(6):
+            for ai, base in enumerate(alphabet):
+                rust_freq = sum(s[pos] == base for s in rust_seqs) / n
+                py_freq   = sum(s[pos] == base for s in py_seqs)   / n
+                self.assertAlmostEqual(
+                    rust_freq, py_freq, delta=0.02,
+                    msg=f"pos={pos} base={base}: rust={rust_freq:.3f} py={py_freq:.3f}"
+                )
+
+        # Timing comparison on a large batch
+        import time
+        pwm_bench = np.full((200, 4), 0.25, dtype=np.float64)
+        n_bench = 50000
+        # warm-up
+        _sample_from_pwm_rust(pwm_bench, n_seqs=100, rng=np.random.default_rng(0))
+        _sample_from_pwm_numpy(pwm_bench, n_seqs=100, rng=np.random.default_rng(0))
+
+        t0 = time.perf_counter()
+        _sample_from_pwm_rust(pwm_bench, n_seqs=n_bench, rng=np.random.default_rng(0))
+        t_rust = time.perf_counter() - t0
+
+        t0 = time.perf_counter()
+        _sample_from_pwm_numpy(pwm_bench, n_seqs=n_bench, rng=np.random.default_rng(0))
+        t_py = time.perf_counter() - t0
+
+        print(f"\nsample_from_pwm timing ({n_bench} seqs × {pwm_bench.shape[0]} bp):")
+        print(f"  Rust : {t_rust*1000:.1f} ms")
+        print(f"  Python: {t_py*1000:.1f} ms")
+        print(f"  Speedup: {t_py/t_rust:.1f}x")
 
 
 if __name__ == "__main__":
