@@ -91,7 +91,23 @@ jobs:
           name: dist
           path: dist/
 
+      - name: Select manylinux2014 wheels
+        shell: bash
+        run: |
+          mkdir -p publish-dist
+  
+          find dist -type f \( \
+            -name '*manylinux_2_17*.whl' -o \
+            -name '*manylinux2014*.whl' \
+          \) -exec cp -v {} publish-dist/ \;
+  
+          # Fail instead of silently publishing nothing
+          test -n "$(find publish-dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
+  
+          echo "Files to publish:"
+          find publish-dist -maxdepth 1 -type f -name '*.whl' -print
+
       - name: Publish
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: dist/
+          packages-dir: publish-dist/
