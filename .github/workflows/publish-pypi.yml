@@ -57,19 +57,22 @@ jobs:
           print("Tag matches version:", tag)
           PY
 
-      - name: Build sdist and wheel
-        run: python -m build --sdist --wheel --outdir dist/
+      - name: Build wheel using maturin
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release
 
       - name: Python compile check
         run: python -m py_compile tpcav/*.py scripts/*.py test/*.py
 
       - name: Twine check
-        run: python -m twine check --strict dist/*
+        run: python -m twine check --strict rust/target/*
 
       - uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: dist/
+          path: rust/target/
 
   publish:
     name: Publish to PyPI
