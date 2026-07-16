@@ -67,12 +67,12 @@ jobs:
         run: python -m py_compile src/tpcav/*.py scripts/*.py test/*.py
 
       - name: Twine check
-        run: python -m twine check --strict rust/target/*
+        run: python -m twine check --strict rust/target/wheels/*
 
       - uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: rust/target/
+          path: rust/target/wheels/
 
   publish:
     name: Publish to PyPI
