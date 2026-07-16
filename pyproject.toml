@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "tpcav"
@@ -30,5 +30,7 @@ keywords = ["interpretation",  "attribution", "concept", "genomics", "deep learn
 [project.urls]
 Homepage = "https://github.com/seqcode/TPCAV"
 
-[tool.setuptools.packages.find]
-exclude = ["data", "model", "node_modules", "test", "scripts"]
+[tool.maturin]
+module-name = "tpcav.rust_optim"
+manifest-path = "rust/Cargo.toml"
+python-source = "src"
