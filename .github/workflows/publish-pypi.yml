@@ -61,7 +61,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           command: build
-          args: --release --target aarch64-unknown-linux-gnu --zig
+          args: --release --zig --compatibility manylinux2014
 
       - name: Python compile check
         run: python -m py_compile src/tpcav/*.py scripts/*.py test/*.py
