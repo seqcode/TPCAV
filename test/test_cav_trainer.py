@@ -407,14 +407,6 @@ class TPCAVTest(unittest.TestCase):
 
         #lp.disable_by_count()
         #lp.print_stats()
-        
-        # test save and restore states
-        tpcav_model.save_state("data/tmp_tpcav_model.state.pt")
-        tpcav_model = TPCAV.load_state(DummyModelSeq(), layer_name="layer1", state_path="data/tmp_tpcav_model.state.pt")
-
-        cav_trainer.save_state("data/tmp_cav_trainer.state.pt")
-        cav_trainer = CavTrainer.load_state(tpcav_model, state_path="data/tmp_cav_trainer.state.pt")
-
 
     def test_rust_svd_backend(self):
         """Verify rust SVD backend gives same result as scipy on identical input (up to sign flips)."""
