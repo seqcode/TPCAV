@@ -126,7 +126,7 @@ class TPCAV(torch.nn.Module):
         # sample a few samples to determine what's the maximum number of samples we can have for each concept to get PCA as complete as possible
         sample_avs = self._sample_concept(concepts[0], num_samples=4)
         num_embed_dims = sample_avs.flatten(start_dim=1).shape[1]
-        max_samples_per_concept = math.floor(math.pow(2, 31)/(num_embed_dims * len(concepts)))
+        max_samples_per_concept = math.floor((math.pow(2, 31)-1)/(num_embed_dims * len(concepts)))
         logger.info(f"max # samples per concept is {max_samples_per_concept}, # dims is {num_embed_dims}")
 
         if not num_samples_per_concept:
