@@ -112,7 +112,7 @@ class TPCAV(torch.nn.Module):
         concepts: Iterable,
         num_samples_per_concept: Optional[int] = 10,
         num_pc: Optional[Union[int, str]] = None,
-        svd_backend: str = "scipy",
+        backend: str = "scipy",
     ) -> Dict[str, torch.Tensor]:
         """Sample activations, compute PCA, and attach buffers to the model.
 
@@ -127,10 +127,13 @@ class TPCAV(torch.nn.Module):
         sample_avs = self._sample_concept(concepts[0], num_samples=4)
         num_embed_dims = sample_avs.flatten(start_dim=1).shape[1]
         max_samples_per_concept = math.floor((math.pow(2, 31)-1)/(num_embed_dims * len(concepts)))
-        logger.info(f"max # samples per concept is {max_samples_per_concept}, # dims is {num_embed_dims}")
+        logger.info(f"max # samples per concept is {max_samples_per_concept} under 32bit integer index limit, # dims is {num_embed_dims}")
 
         if not num_samples_per_concept:
             num_samples_per_concept = max_samples_per_concept
+            logger.info(f"# samples per concept is set as {max_samples_per_concept}")
+        elif num_samples_per_concept > max_samples_per_concept:
+            raise Exception(f"# total concept samples for PCA exceeds 32bit integer index limit! Please set svd_backend to rust if you want to proceed with current # samples per concept")
 
         all_avs = self._collect_concept_examples(concepts, num_samples_per_concept)
         orig_shape = all_avs.shape
@@ -144,7 +147,7 @@ class TPCAV(torch.nn.Module):
         standardized = (flat - mean) / std
 
         if num_pc is None or num_pc == "full":
-            S, Vh = self._svd_thin(standardized, backend=svd_backend)
+            S, Vh = self._svd_thin(standardized, backend=backend)
             Vh = torch.tensor(Vh)
             self._full_transform=True
         elif int(num_pc) == 0:
@@ -152,7 +155,7 @@ class TPCAV(torch.nn.Module):
             Vh = None
             self._full_transform=False
         else:
-            S, Vh = self._svd_thin(standardized, backend=svd_backend)
+            S, Vh = self._svd_thin(standardized, backend=backend)
             self._full_transform = False if int(num_pc) < standardized.shape[1] else True
             Vh = torch.tensor(Vh[: int(num_pc)])
 

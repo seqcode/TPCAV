@@ -251,7 +251,7 @@ def _train(
 
     Requires set_control to have been called beforehand.
     """
-    assert backend in ["sklearn", "torch"], "Backend has to be either sklearn or torch!"
+    assert backend in ["sklearn", "torch"], "Classifier backend has to be either sklearn or torch!"
 
     output_dir = Path(output_dir)
     
@@ -883,7 +883,8 @@ def run_tpcav(
     generate_html_report=True,
     html_report_fscore_thresh=0.9,
     seed=1001,
-    backend='sklearn',
+    classifier_backend='sklearn',
+    svd_backend='scipy',
     device=None,
 ):
     """
@@ -891,6 +892,8 @@ def run_tpcav(
     """
     assert motif_control_type in ["random", "permute"], "motif_control_type has to be one of [random, permute]!"
     assert motif_file_fmt in ['meme', 'consensus'], "motif_file_fmt has to be one of [meme, consensus]!"
+    assert classifier_backend in ['sklearn', 'torch'], "classifier backend has to be one of [sklearn, torch]!"
+    assert svd_backend in ['scipy', 'rust'], "svd backend has to be one of [scipy, rust]!"
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -971,6 +974,7 @@ def run_tpcav(
         concepts=motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca() + non_motif_concept_builder.concepts_for_pca() if non_motif_concept_builder is not None else motif_concept_builders[num_motif_insertions[-1]].concepts_for_pca(),
         num_samples_per_concept=num_samples_for_pca,
         num_pc=num_pc,
+        backend=svd_backend
     )
     #torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
@@ -982,13 +986,13 @@ def run_tpcav(
             cav_trainer.train_concepts_pairs(motif_concepts_pairs[nm], 
                                              num_samples_for_cav, 
                                              output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                             num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device)
+                                             num_processes=p, max_pending=max_pending_jobs, backend=classifier_backend, device=device)
         else:
             cav_trainer.set_control(motif_concept_builders[nm].control_concepts[0], num_samples=num_samples_for_cav)
             cav_trainer.train_concepts([c for c, _ in motif_concepts_pairs[nm]],
                                         num_samples_for_cav,
                                         output_dir=str(output_path / f"cavs_{nm}_motifs/"),
-                                        num_processes=p, max_pending=max_pending_jobs, backend=backend, device=device)
+                                        num_processes=p, max_pending=max_pending_jobs, backend=classifier_backend, device=device)
         if save_cav_trainer:
             torch.save(cav_trainer, str(output_path / f"cavs_{nm}_motifs/cav_trainer.pt"))
         motif_cav_trainers[nm] = cav_trainer
@@ -1003,7 +1007,7 @@ def run_tpcav(
             num_samples_for_cav,
             output_dir=str(output_path / f"cavs_bed_concepts/"),
             num_processes=p,
-            backend=backend,
+            backend=classifier_backend,
             device=device
         )
         if save_cav_trainer:
