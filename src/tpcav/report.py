@@ -5,12 +5,15 @@ import datetime as _dt
 import html as _html
 import io
 import json
+import logging
 import mimetypes
 import re
 from pathlib import Path
-from typing import Any, Mapping, Optional, Union
+from typing import Any, List, Mapping, Optional, Union
 
 from tpcav import utils
+
+logger = logging.getLogger(__name__)
 
 def _read_as_data_uri(path: Path) -> str:
     mime, _ = mimetypes.guess_type(str(path))
@@ -325,28 +328,24 @@ def generate_tpcav_html_report(
             if motif_file is not None and motif_file_fmt == "meme":
                 motif_meme_file = str(motif_file)
 
-            heatmap_data["motif"] = motif_trainer.plot_cavs_similaritiy_heatmap(
-                attributions=attributions,
-                concept_list=list(motif_trainer.cav_weights.keys()),
-                fscore_thresh=fscore_thresh,
-                motif_meme_file=motif_meme_file,
-                output_path=str(heatmap_png_paths["motif"]),
-            )
-            heatmap_data["non-motif"] = extra_trainer.plot_cavs_similaritiy_heatmap(
-                attributions=attributions,
-                concept_list=list(extra_trainer.cav_weights.keys()),
-                fscore_thresh=fscore_thresh,
-                motif_meme_file=None,
-                output_path=str(heatmap_png_paths["non-motif"]),
-            )
-            heatmap_data["merged"] = merged_trainer.plot_cavs_similaritiy_heatmap(
-                attributions=attributions,
-                concept_list=list(merged_trainer.cav_weights.keys()),
-                fscore_thresh=fscore_thresh,
-                motif_meme_file=motif_meme_file,
-                output_path=str(heatmap_png_paths["merged"]),
-            )
+            for key, trainer, meme_file in [
+                ("motif", motif_trainer, motif_meme_file),
+                ("non-motif", extra_trainer, None),
+                ("merged", merged_trainer, motif_meme_file),
+            ]:
+                try:
+                    heatmap_data[key] = trainer.plot_cavs_similaritiy_heatmap(
+                        attributions=attributions,
+                        concept_list=list(trainer.cav_weights.keys()),
+                        fscore_thresh=fscore_thresh,
+                        motif_meme_file=meme_file,
+                        output_path=str(heatmap_png_paths[key]),
+                    )
+                except Exception:
+                    logger.warning("Failed to generate %s heatmap", key, exc_info=True)
+                    heatmap_data[key] = None
         except Exception:
+            logger.warning("Failed to set up heatmap trainers", exc_info=True)
             heatmap_data = {"motif": None, "non-motif": None, "merged": None}
 
     # -----------------------------------------------------------------------------
@@ -452,10 +451,29 @@ def generate_tpcav_html_report(
 
     motif_auc_table_html = ""
     if motif_auc_df is not None:
+        ranked_df = motif_auc_df.copy()
+        # filter by fscore_thresh at max insertions
+        motif_ranking_filter_note = ""
+        if motif_insertions:
+            max_ins = max(motif_insertions)
+            fscore_col = f"fscore_{max_ins}_insertions"
+            if fscore_col in ranked_df.columns:
+                n_total = len(ranked_df)
+                ranked_df = ranked_df[ranked_df[fscore_col].fillna(0) >= fscore_thresh]
+                n_kept = len(ranked_df)
+                motif_ranking_filter_note = (
+                    f"<div class='muted' style='margin-bottom:6px'>"
+                    f"Showing {n_kept} of {n_total} motifs with "
+                    f"<code>{fscore_col}</code> &ge; {fscore_thresh} "
+                    f"(fscore_thresh). Adjust <em>fscore_thresh</em> to change this threshold."
+                    f"</div>"
+                )
         # append motif logo column if exists
-        if motif_file_fmt=='meme' and (len(motif_logo_dict)>0):
-            motif_auc_df['motif_logo'] = motif_auc_df.apply(lambda x: "<img src=\"" + motif_logo_dict.get(x['concept'], 'null') + "\" width=\"100\">", axis=1)
-        motif_auc_table_html = _render_df_table(motif_auc_df, max_rows=5000)
+        if motif_file_fmt == 'meme' and len(motif_logo_dict) > 0:
+            ranked_df['motif_logo'] = ranked_df.apply(
+                lambda x: "<img src=\"" + motif_logo_dict.get(x['concept'], '') + "\" width=\"100\">", axis=1
+            )
+        motif_auc_table_html = motif_ranking_filter_note + _render_df_table(ranked_df, max_rows=5000)
 
     if embed_images:
         assets_note = (
@@ -513,7 +531,7 @@ def generate_tpcav_html_report(
             motif_df = motif_df[[c for c in motif_cols if c in motif_df.columns]]
             # append motif logo column if exists
             if motif_file_fmt=='meme' and (len(motif_logo_dict)>0):
-                motif_df['motif_logo'] = motif_df.apply(lambda x: "<img src=\"" + motif_logo_dict[x['concept']] + "\" width=\"100\">", axis=1)
+                motif_df['motif_logo'] = motif_df.apply(lambda x: "<img src=\"" + motif_logo_dict.get(x['concept'], '') + "\" width=\"100\">", axis=1)
             motif_table_html = _render_df_table(motif_df, max_rows=5000)
         if non_motif_concept_rows:
             extra_df = pd.DataFrame(non_motif_concept_rows)
