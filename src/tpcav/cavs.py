@@ -976,7 +976,7 @@ def run_tpcav(
         num_pc=num_pc,
         backend=svd_backend
     )
-    #torch.save(tpcav_model, output_path / "tpcav_model.pt")
+    torch.save(tpcav_model, output_path / "tpcav_model.pt")
 
     # create trainer for computing CAVs
     motif_cav_trainers = {}
