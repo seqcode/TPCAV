@@ -8,7 +8,7 @@ access to concept construction and PCA/attribution workflows.
 import logging
 
 # Set the logging level to INFO
-logging.basicConfig(level=logging.INFO)
+#logging.basicConfig(level=logging.INFO)
 
 from .cavs import CavTrainer, run_tpcav
 from .concepts import ConceptBuilder
