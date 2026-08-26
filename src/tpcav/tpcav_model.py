@@ -251,6 +251,7 @@ class TPCAV(torch.nn.Module):
         baseline_batches: Iterable,
         multiply_by_inputs: bool = True,
         abs_inputs_diff: bool = True,
+        **attr_params
     ) -> torch.Tensor:
         """
         Compute attributions on PCA embedding space.
@@ -286,6 +287,7 @@ class TPCAV(torch.nn.Module):
                     additional_forward_args=(
                         [torch.cat([i, bi]) for i, bi in zip(inputs, binputs)],
                     ),
+                    **attr_params
                 )
                 attr_residual, attr_projected = attribution
                 diff_residual = avs_residual - bavs_residual
@@ -301,6 +303,7 @@ class TPCAV(torch.nn.Module):
                         None,
                         [torch.cat([i, bi]) for i, bi in zip(inputs, binputs)],
                     ),
+                    **attr_params
                 )[0]
                 difference = avs_residual - bavs_residual
 
@@ -331,6 +334,7 @@ class TPCAV(torch.nn.Module):
         baseline_batches: Iterable,
         multiply_by_inputs: bool = True,
         cavs_list: Optional[List[torch.Tensor]] = None,
+        **attr_params
     ) -> List[torch.Tensor]:
         """Compute attributions on PCA embedding space.
 
@@ -352,6 +356,7 @@ class TPCAV(torch.nn.Module):
             attribution = model_attr.attribute(
                 tuple([i.to(self.device) for i in inputs]),
                 baselines=tuple([bi.to(self.device) for bi in binputs]),
+                **attr_params
             )
             difference = []
             for i, bi in zip(inputs, binputs):
