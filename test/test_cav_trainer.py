@@ -340,7 +340,7 @@ class TPCAVTest(unittest.TestCase):
             return zip(
                 seq_one_hot_iter,
             )
-
+        tpcav_model.set_attr_method("intgrad")
         attributions = tpcav_model.layer_attributions(
             pack_data_iters(random_regions_1), pack_data_iters(random_regions_2)
         ).cpu()

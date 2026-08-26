@@ -5,7 +5,7 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
-from captum.attr import DeepLift
+from captum.attr import DeepLift, IntegratedGradients
 from scipy.linalg import svd
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ class TPCAV(torch.nn.Module):
         device: Optional[str] = None,
         layer_name: Optional[str] = None,
         layer: Optional[torch.nn.Module] = None,
+        attr_method='deeplift'
     ) -> None:
         """
         layer_name: optional module name to intercept activations via forward hook
@@ -53,6 +54,11 @@ class TPCAV(torch.nn.Module):
             raise Exception(
                 "You have to specify either layer or layer_name to construct TPCAV model"
             )
+        self.set_attr_method(attr_method)
+
+    def set_attr_method(self, attr_method="deeplift"):
+        assert attr_method in ["deeplift", "intgrad"]
+        self.attr = DeepLift if attr_method == 'deeplift' else IntegratedGradients
 
     def list_module_names(self) -> List[str]:
         """List all module names in the model for layer selection."""
@@ -247,7 +253,7 @@ class TPCAV(torch.nn.Module):
         abs_inputs_diff: bool = True,
     ) -> torch.Tensor:
         """
-        Compute DeepLift attributions on PCA embedding space.
+        Compute attributions on PCA embedding space.
 
         By default, it computes (input - baseline).abs() * multiplier to avoid double-sign effects (abs_inputs_diff=True).
 
@@ -256,9 +262,7 @@ class TPCAV(torch.nn.Module):
         if not self.fitted:
             raise RuntimeError("Call fit_pca before attributing.")
         self.forward = self.forward_from_embeddings_at_layer
-        deeplift = DeepLift(self, multiply_by_inputs=multiply_by_inputs)
-
-        custom_attr_func = _abs_attribution_func if abs_inputs_diff else None
+        model_attr = self.attr(self, multiply_by_inputs=False)
 
         attributions = []
         for inputs, binputs in zip(target_batches, baseline_batches):
@@ -273,7 +277,7 @@ class TPCAV(torch.nn.Module):
             if avs_projected is not None:
                 avs_projected = avs_projected.detach()
                 bavs_projected = bavs_projected.detach()
-                attribution = deeplift.attribute(
+                attribution = model_attr.attribute(
                     (avs_residual.to(self.device), avs_projected.to(self.device)),
                     baselines=(
                         bavs_residual.to(self.device),
@@ -282,24 +286,29 @@ class TPCAV(torch.nn.Module):
                     additional_forward_args=(
                         [torch.cat([i, bi]) for i, bi in zip(inputs, binputs)],
                     ),
-                    custom_attribution_func=(
-                        None if not multiply_by_inputs else custom_attr_func
-                    ),
                 )
                 attr_residual, attr_projected = attribution
+                diff_residual = avs_residual - bavs_residual
+                diff_projected = avs_projected - bavs_projected
+
                 attribution = torch.cat((attr_projected, attr_residual), dim=1)
+                difference = torch.cat((diff_projected, diff_residual), dim=1)
             else:
-                attribution = deeplift.attribute(
+                attribution = model_attr.attribute(
                     (avs_residual.to(self.device),),
                     baselines=(bavs_residual.to(self.device),),
                     additional_forward_args=(
                         None,
                         [torch.cat([i, bi]) for i, bi in zip(inputs, binputs)],
                     ),
-                    custom_attribution_func=(
-                        None if not multiply_by_inputs else custom_attr_func
-                    ),
                 )[0]
+                difference = avs_residual - bavs_residual
+
+            if multiply_by_inputs:
+                if abs_inputs_diff:
+                    attribution = attribution * torch.abs(difference)
+                else:
+                    attribution = attribution * difference
 
             attributions.append(attribution.detach().cpu())
 
@@ -323,9 +332,9 @@ class TPCAV(torch.nn.Module):
         multiply_by_inputs: bool = True,
         cavs_list: Optional[List[torch.Tensor]] = None,
     ) -> List[torch.Tensor]:
-        """Compute DeepLift attributions on PCA embedding space.
+        """Compute attributions on PCA embedding space.
 
-        target_batches and baseline_batches should yield (seq, chrom) pairs of matching length.
+        target_batches and baseline_batches should yield tupel of inputs of matching length.
         """
         if not self.fitted:
             raise RuntimeError("Call fit_pca before attributing.")
@@ -336,19 +345,30 @@ class TPCAV(torch.nn.Module):
             mute_x_avs=False,
             mute_remainder=True,
         )
-        deeplift = DeepLift(self, multiply_by_inputs=multiply_by_inputs)
+        model_attr = self.attr(self, multiply_by_inputs=False)
 
         attributions = []
         for inputs, binputs in zip(target_batches, baseline_batches):
-            attribution = deeplift.attribute(
+            attribution = model_attr.attribute(
                 tuple([i.to(self.device) for i in inputs]),
                 baselines=tuple([bi.to(self.device) for bi in binputs]),
             )
-            attributions.append(
-                [a.detach().cpu() for a in attribution]
-                if isinstance(attribution, tuple)
-                else attribution.detach().cpu()
-            )
+            difference = []
+            for i, bi in zip(inputs, binputs):
+                difference.append(i - bi)
+            
+            if multiply_by_inputs:
+                if isinstance(attribution, tuple):
+                    attributions.append([a.detach().cpu() * d for a, d in zip(attribution, difference)])
+                else:
+                    assert len(difference) == 1
+                    attributions.append(attribution.detach().cpu * difference[0])
+            else:
+                attributions.append(
+                    [a.detach().cpu() for a in attribution]
+                    if isinstance(attribution, tuple)
+                    else attribution.detach().cpu()
+                )
 
         return [torch.cat(z) for z in zip(*attributions)]
 
