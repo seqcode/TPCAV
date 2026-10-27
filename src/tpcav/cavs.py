@@ -559,17 +559,19 @@ class CavTrainer:
 
     def tpcav_score(
         self, concept_name: str, attributions: torch.Tensor
-    ) -> torch.Tensor:
+    ) -> float:
         """
-        Compute a simple TCAV score: mean directional attribution along the concept CAV.
+        Compute a simple TCAV score: fraction of examples with positive directional attribution along the concept CAV.
         """
         if concept_name not in self.cav_weights:
             raise ValueError(f"No CAV weights stored for concept {concept_name}")
         weights = self.cav_weights[concept_name]
         flat_attr = attributions.flatten(start_dim=1)
         scores = torch.matmul(flat_attr, weights.to(flat_attr.device).unsqueeze(-1))
+        
+        pos_ratio = (scores > 0).float().mean().item()
 
-        return scores
+        return pos_ratio
 
     def tpcav_score_all_concepts(self, attributions: torch.Tensor) -> dict:
         """
@@ -577,32 +579,29 @@ class CavTrainer:
         """
         scores_dict = {}
         for concept_name in self.cav_weights.keys():
-            scores = self.tpcav_score(concept_name, attributions)
-            scores_dict[concept_name] = scores
+            score = self.tpcav_score(concept_name, attributions)
+            scores_dict[concept_name] = score
         return scores_dict
 
-    def tpcav_score_binary_log_ratio(
-        self, concept_name: str, attributions: torch.Tensor, pseudocount: float = 1.0
+    def tpcav_score_log_ratio(
+        self, concept_name: str, attributions: torch.Tensor, pseudocount: float = 0.01
     ) -> float:
         """
-        Compute TCAV log ratio score: log2 of ratio of positive to negative directional attributions.
+        Compute TCAV log ratio score: natural log of ratio of positive fraction to negative fraction of attributed examples.
         """
-        scores = self.tpcav_score(concept_name, attributions)
+        pos_ratio = self.tpcav_score(concept_name, attributions)
 
-        pos_count = (scores > 0).sum().item()
-        neg_count = (scores < 0).sum().item()
-
-        return np.log((pos_count + pseudocount) / (neg_count + pseudocount))
+        return np.log((pos_ratio + pseudocount) / (1 - pos_ratio + pseudocount))
 
     def tpcav_score_all_concepts_log_ratio(
-        self, attributions: torch.Tensor, pseudocount: float = 1.0
+        self, attributions: torch.Tensor, pseudocount: float = 0.01
     ) -> dict:
         """
         Compute TCAV log ratio scores for all trained concepts.
         """
         log_ratio_dict = {}
         for concept_name in self.cav_weights.keys():
-            log_ratio = self.tpcav_score_binary_log_ratio(
+            log_ratio = self.tpcav_score_log_ratio(
                 concept_name, attributions, pseudocount
             )
             log_ratio_dict[concept_name] = log_ratio
@@ -675,7 +674,7 @@ class CavTrainer:
                 ax_log.set_position([offset, heatmap_bbox.y0, 0.2, heatmap_bbox.height])
 
                 log_ratios_reordered = [
-                    self.tpcav_score_binary_log_ratio(cname, attrs)
+                    self.tpcav_score_log_ratio(cname, attrs)
                     for cname in cavs_names_sorted
                 ]
                 log_ratios_by_attr[i] = log_ratios_reordered
@@ -689,7 +688,7 @@ class CavTrainer:
 
                 ax_log.set_xlim(left=-5, right=5)
                 ax_log.yaxis.tick_right()
-                ax_log.set_title(f"TCAV log ratio {i}")
+                ax_log.set_title(f"TPCAV log ratio {i}")
                 ax_log.get_yaxis().set_visible(False)
                 ax_logs.append(ax_log)
             ax_logs[-1].get_yaxis().set_visible(True) # only show yaxis labels in the last log ratio plot
